@@ -253,9 +253,14 @@ final class Listener {
         restartTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: false) { [weak self] _ in self?.restart() }
     }
 
-    /// Coalesced: however many callers ask within the same moment, one new request starts.
+    /// The current request is dropped at once (nothing it still delivers counts, so the Mac's own voice at
+    /// the end of an answer can never become a follow-up); the next one starts a moment later. Coalesced.
     func restart() {
-        guard engine.isRunning, !restartPending else { return }
+        guard engine.isRunning else { return }
+        gen += 1
+        task?.cancel(); task = nil
+        request?.endAudio(); request = nil
+        guard !restartPending else { return }
         restartPending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             self.restartPending = false
