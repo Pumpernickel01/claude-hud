@@ -34,7 +34,10 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
 POLL_S, PING_S = 0.25, 15.0
 CLAUDE = os.environ.get("CLAUDE_HUD_CLAUDE", "claude")
 TOKEN_FILE = os.environ.get("CLAUDE_HUD_TOKEN_FILE", os.path.expanduser("~/.cache/claude-hud/token"))
-TOKEN = secrets.token_hex(16)  # per run; the page gets it inline, the listener reads the 0600 file
+# Per run; the page gets it inline, the listener reads the 0600 file. A cross-site request forgery guard,
+# not local authentication: only a loopback Host can fetch the page and other sites cannot read it, while
+# any local program can run `claude` itself, so there is no local boundary to enforce here.
+TOKEN = secrets.token_hex(16)
 
 
 def write_token():
