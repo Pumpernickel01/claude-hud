@@ -22,7 +22,9 @@ let hudDir = ProcessInfo.processInfo.environment["CLAUDE_HUD_DIR"]
 let dryRun = args.contains("--dry-run")
 let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? (NSHomeDirectory() + "/.cache/claude-hud/token")
 func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
-let wakeRegex = try! NSRegularExpression(pattern: "\\b(hey|hay|hi|a)[,.]?\\s+(claude|cloud|clawed|claud|clod|clyde)\\b[,.!?]*", options: .caseInsensitive)
+// "hey"/"hay" with the name or its usual mishearings; "hi" only with the name itself. Never a bare article:
+// "a cloud" is ordinary speech, and anything after a false wake would be sent and billed.
+let wakeRegex = try! NSRegularExpression(pattern: "\\b(?:(?:hey|hay)[,.]?\\s+(?:claude|cloud|clawed|claud|clod|clyde)|hi[,.]?\\s+claude)\\b[,.!?]*", options: .caseInsensitive)
 
 // Lines go to stderr and to ~/.cache/claude-hud/listen.log (0600): launched as an app, stderr goes nowhere.
 let logPath = ProcessInfo.processInfo.environment["CLAUDE_HUD_LOG"] ?? (NSHomeDirectory() + "/.cache/claude-hud/listen.log")
