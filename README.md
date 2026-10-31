@@ -29,23 +29,26 @@ once at http://127.0.0.1:7431/. If you already use
 this already (its `hud` folder); this plugin's hooks stay quiet when they see
 `mods@claude-mods` installed, so the log is never written twice.
 
-## "Hey Claude": wake word, orb, and talking to Jarvis
+## "Hey Claude": always listening, orb, and talking to Jarvis
 
-`bin/hud listen` runs an always-on listener (`hud/listen.swift`, built once
-with the Swift compiler from the Command Line Tools) that uses Apple's
-on-device speech recognition. Nothing is sent anywhere and nothing is kept
-until it hears "Hey Claude". Then an orb pulses in the middle of the screen,
-the HUD docks beside the terminal, the status strip turns to *listening*, and
-whatever you say next (in the same breath, or within about eight seconds) goes
-to Jarvis: the server runs `claude -p` with it, shows the exchange in the
-HUD's Jarvis panel, and reads the answer aloud. Say only "Hey Claude" and the
-HUD opens with its input focused so you can type instead; `/` focuses it any
-time. One conversation continues for as long as the server runs.
+`bin/hud listen --install` makes the listener a login item (a launchd agent,
+restarted if it dies), so it is always on, like a phone's assistant.
+`hud/listen.swift` is built once with the Swift compiler from the Command Line
+Tools and uses Apple's on-device speech recognition: nothing is sent anywhere
+and nothing is kept until it hears "Hey Claude". The first time it runs, macOS
+asks for the microphone and for speech recognition; allow both.
+`bin/hud listen --uninstall` removes it; `bin/hud listen` runs it once by hand.
 
-First run, by hand, from your terminal: `bin/hud listen`. macOS asks twice,
-for the microphone and for speech recognition; allow both. After that,
-`CLAUDE_HUD_LISTEN=1` in your shell starts the listener with each Claude Code
-session. `~/.cache/claude-hud/listen --orb` shows the animation on its own;
+On "Hey Claude": an orb pulses in the middle of the screen for as long as it
+listens, the HUD opens full screen in wake mode (the graph dims, a level
+meter, your words as they are heard with a block cursor), and what you said
+goes to Jarvis. The answer is typed out on screen and read aloud. For eight
+seconds after the answer the next sentence needs no wake word, so a
+conversation flows. Say only "Hey Claude" and the wake screen opens with its
+input focused so you can type instead; esc closes it, `/` focuses it any time.
+One conversation continues for as long as the server runs.
+
+`~/.cache/claude-hud/listen --orb` shows the animation on its own;
 `--text "hey claude what time is it" --dry-run` runs the wake handler without
 a microphone.
 
@@ -55,8 +58,9 @@ setup, resumed or not. `CLAUDE_HUD_MODEL` picks a cheaper model. The call runs
 with default permissions in your home directory: it answers and reads, it
 cannot run commands or edit files, so "open Spotify" needs the planned
 mac-operator agent, not this. Its events land in the log like any session's,
-so the HUD follows Jarvis's work while it answers. English only; speech from
-a video in the room can trigger it; there is no speaker verification.
+so the HUD follows Jarvis's work while it answers and returns to your
+terminal session when it ends. English only; speech from a video in the room
+can trigger it; there is no speaker verification.
 
 ## Docked beside the terminal
 

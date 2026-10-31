@@ -50,8 +50,11 @@ assert post("/ask", {"text": "ping"}) == 202
 assert post("/ask", {"text": "again"}) == 409, "a second ask must wait"
 assert post("/ask", {"text": "   "}) == 400
 assert post("/state", {"name": "listening"}) == 204 and post("/state", {"name": "bogus"}) == 400
+assert post("/state", {"name": "listening", "text": "what time"}) == 204  # words heard so far: a hearing event, not a log record
+j = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/jarvis", timeout=3).read()); assert j["state"] == "listening" and "busy" in j, j
 read_until(b'event: chat'); read_until(b'"kind": "ask"')
-read_until(b'"state":"listening"'); read_until(b'echo: ping')
+read_until(b'"state":"listening"'); read_until(b'"kind": "hearing", "text": "what time"'); read_until(b'echo: ping')
+assert stream.count(b'"state":"listening"') == 1, "a live transcript must not log a second state record"
 print("server smoke test ok")
 PY
 # dock geometry: a right column, a left column, an explicit box
@@ -69,6 +72,13 @@ if command -v swiftc >/dev/null; then
   OUT=$(CLAUDE_HUD_TOKEN_FILE="$TMP/token" "$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
   echo "$OUT" | grep -q 'ask: what time is it' && echo "$OUT" | grep -q '/state' && echo "listener wake handler ok" || { echo "listener: $OUT"; exit 1; }
 fi
+# the launchd agent plist, without touching launchd
+python3 - <<'PY'
+import sys, plistlib; sys.path.insert(0, '.'); import dock
+d = plistlib.loads(dock.agent_plist('/usr/bin/python3', '/x/dock.py', '/x/a b.log').encode())
+assert d['ProgramArguments'] == ['/usr/bin/python3', '/x/dock.py', 'listen'] and d['KeepAlive'] is True and d['StandardErrorPath'] == '/x/a b.log'
+print("agent plist ok")
+PY
 # launcher: a listening port means no second server and no browser; --no-open never starts a listener
 CLAUDE_MODS_HUD_PORT="$PORT" BROWSER=/usr/bin/false python3 launch.py
 CLAUDE_MODS_HUD_PORT="$PORT" CLAUDE_HUD_LISTEN=1 python3 launch.py --no-open

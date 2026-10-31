@@ -39,7 +39,7 @@ func openHud() {
     if dryRun { log("open hud"); return }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-    p.arguments = [hudDir + "/dock.py", "open"]
+    p.arguments = [hudDir + "/dock.py", "wake"]
     p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
     try? p.run()
 }
@@ -64,8 +64,12 @@ final class OrbView: NSView {
     }
 }
 
-func showOrb(seconds: Double = 1.6, then: (() -> Void)? = nil) {
-    guard let screen = NSScreen.main else { then?(); return }
+final class Orb { var close: () -> Void = {} }
+
+@discardableResult
+func showOrb(seconds: Double = 1.6, then: (() -> Void)? = nil) -> Orb {
+    let orb = Orb()
+    guard let screen = NSScreen.main else { then?(); return orb }
     let size: CGFloat = 260
     let frame = NSRect(x: screen.frame.midX - size / 2, y: screen.frame.midY - size / 2, width: size, height: size)
     let w = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -76,43 +80,60 @@ func showOrb(seconds: Double = 1.6, then: (() -> Void)? = nil) {
     w.alphaValue = 0; w.orderFrontRegardless()
     NSAnimationContext.runAnimationGroup { ctx in ctx.duration = 0.25; w.animator().alphaValue = 1 }
     let start = Date()
+    var closing = false
+    let fade = {
+        if closing { return }
+        closing = true
+        NSAnimationContext.runAnimationGroup({ ctx in ctx.duration = 0.5; w.animator().alphaValue = 0 }, completionHandler: { w.orderOut(nil); then?() })
+    }
     let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in
         v.t = Date().timeIntervalSince(start); v.needsDisplay = true
-        if v.t > seconds {
-            timer.invalidate()
-            NSAnimationContext.runAnimationGroup({ ctx in ctx.duration = 0.4; w.animator().alphaValue = 0 }, completionHandler: { w.orderOut(nil); then?() })
-        }
+        if closing { timer.invalidate() } else if seconds > 0 && v.t > seconds { fade() }
     }
     RunLoop.main.add(timer, forMode: .common)
+    orb.close = fade
+    return orb
 }
 
 // MARK: - Wake handling
 final class Jarvis {
     var capturing = false
+    var followUp = false          // a capture that needs no wake word: right after an answer was spoken
     var wakeAt = Date.distantPast
     var lastChange = Date.distantPast
     var rest = ""
     var cooldownUntil = Date.distantPast
+    var followUntil = Date.distantPast
+    var orb: Orb?
     var onRestart: (() -> Void)?
 
     /// Every partial transcript of the current recognition request passes through here.
     func handle(transcript: String, final: Bool = false) {
         let ns = transcript as NSString
         if !capturing {
+            if Date() < followUntil {  // the conversation goes on: no wake word needed
+                let words = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !words.isEmpty else { return }
+                capturing = true; followUp = true; wakeAt = Date(); lastChange = Date(); rest = words
+                orb = showOrb(seconds: 0); post("/state", ["name": "listening", "text": rest])
+                if final { finish() }
+                return
+            }
             guard Date() > cooldownUntil,
                   let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) else { return }
-            capturing = true; wakeAt = Date(); lastChange = Date()
+            capturing = true; followUp = false; wakeAt = Date(); lastChange = Date()
             rest = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
             log("wake: \"\(rest)\"")
-            showOrb(); openHud(); post("/state", ["name": "listening"])
+            orb = showOrb(seconds: 0); openHud(); post("/state", ["name": "listening", "text": rest])
             if final { finish() }
             return
         }
-        // capturing: the words after the wake phrase, as they keep arriving
-        if let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) {
-            let now = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
-            if now != rest { rest = now; lastChange = Date() }
+        // capturing: the words so far, as they keep arriving, shown live on the page
+        var now = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !followUp, let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) {
+            now = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
         }
+        if now != rest { rest = now; lastChange = Date(); post("/state", ["name": "listening", "text": rest]) }
         if final { finish() }
     }
 
@@ -125,11 +146,36 @@ final class Jarvis {
 
     func finish() {
         guard capturing else { return }
-        capturing = false; cooldownUntil = Date().addingTimeInterval(3)
-        if rest.isEmpty { post("/state", ["name": "idle"]); log("nothing after the wake word: HUD open, type instead") }
-        else { log("ask: \(rest)"); post("/ask", ["text": rest, "speak": true]) }
+        capturing = false; cooldownUntil = Date().addingTimeInterval(3); followUntil = .distantPast
+        orb?.close(); orb = nil
+        if rest.isEmpty { post("/state", ["name": "idle"]); log("nothing heard: HUD open, type instead") }
+        else { log("ask: \(rest)"); post("/ask", ["text": rest, "speak": true]); awaitAnswer() }
         rest = ""
         onRestart?()
+    }
+
+    /// After the answer has been spoken, eight seconds in which the next sentence needs no wake word.
+    func awaitAnswer() {
+        if dryRun { return }
+        var polls = 0
+        func poll() {
+            polls += 1
+            if polls > 240 { return }  // two minutes: give up quietly
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/jarvis")!)
+            req.timeoutInterval = 3
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+                let busy = j["busy"] as? Bool ?? true, state = j["state"] as? String ?? ""
+                DispatchQueue.main.async {
+                    if !busy && state == "idle" {
+                        self.followUntil = Date().addingTimeInterval(8)
+                        self.onRestart?()  // a fresh transcript: the Mac's own voice is not part of it
+                        log("follow-up window open")
+                    } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: poll) }
+                }
+            }.resume()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: poll)
     }
 }
 

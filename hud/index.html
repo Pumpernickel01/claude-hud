@@ -5,149 +5,164 @@
 <title>Claude HUD</title>
 <link rel="icon" href="data:,">
 <style>
-  :root { --base:#1e1e2e; --mantle:#181825; --crust:#11111b; --s0:#313244; --s1:#45475a; --text:#cdd6f4;
-          --sub:#a6adc8; --ov:#6c7086; --blue:#89b4fa; --lav:#b4befe; --green:#a6e3a1; --yellow:#f9e2af;
-          --red:#f38ba8; --peach:#fab387; --teal:#94e2d5; --mauve:#cba6f7; }
-  html, body { margin:0; height:100%; background:var(--crust); color:var(--text);
-               font:13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; overflow:hidden; }
-  #wrap { display:grid; grid-template-columns: 1fr 320px; grid-template-rows: minmax(0, 1fr); height:100%; } /* the row never grows with the side panel's content */
-  body.big #wrap { grid-template-columns: 1fr 0; }
-  body.big aside { display:none; }
-  #stage { position:relative; min-width:0; }
-  canvas { display:block; width:100%; height:100%; background:
-           radial-gradient(ellipse at 50% 45%, #232337 0%, var(--base) 55%, var(--crust) 100%); }
+  :root { --bg:#1b1b1a; --bg2:#161615; --fg:#d3d1c7; --dim:#6f6e68; --rule:#363632; --rule2:#4a4944;
+          --cyan:#8fb8c8; --amber:#d9a85c; --red:#c96a6a; --green:#9bb58a; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+               font:12px/1.5 "SF Mono", Menlo, "DejaVu Sans Mono", monospace; overflow:hidden; }
+  * { box-sizing:border-box; }
+  #wrap { display:grid; grid-template-columns: 1fr 46ch; grid-template-rows: minmax(0, 1fr) auto; height:100%; gap:0 8px; padding:8px 8px 4px; }
+  body.big #wrap { grid-template-columns: 1fr 0; gap:0; }
+  body.big aside, body.big #status { display:none; }
+  .panel { position:relative; border:1px solid var(--rule); min-height:0; min-width:0; }
+  .panel > .title { position:absolute; top:-8px; left:10px; background:var(--bg); padding:0 6px; color:var(--dim); line-height:1; font-size:12px; cursor:default; user-select:none; }
+  .panel > .title b { color:var(--fg); font-weight:400; }
+  #stage { padding:0; }
+  canvas { display:block; width:100%; height:100%; background:var(--bg); }
   canvas.grab { cursor:grab; } canvas.grabbing { cursor:grabbing; }
-  aside { background:var(--mantle); border-left:1px solid var(--s0); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
-  aside h1 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--sub); margin:0;
-             padding:10px 14px 6px; cursor:pointer; user-select:none; }
-  aside h1::after { content:' ▾'; color:var(--ov); } aside h1.closed::after { content:' ▸'; }
-  aside h1.closed + div { display:none; }
-  #head { padding:4px 14px 10px; border-bottom:1px solid var(--s0); }
-  #head b { color:var(--lav); font-weight:600; }
-  #head .st { color:var(--ov); }
-  #head .pr { color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #agents { padding:6px 14px; border-bottom:1px solid var(--s0); max-height:34%; overflow:auto; }
-  #agents div { display:flex; gap:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #agents .dot { width:8px; flex:none; text-align:center; }
-  #agents .meta { color:var(--ov); margin-left:auto; }
-  #tools { flex:1; overflow:auto; padding:6px 14px; min-height:0; }
-  #tools div { display:flex; gap:8px; white-space:nowrap; }
-  #tools .t { color:var(--ov); }
-  #tools .who { color:var(--mauve); min-width:7ch; }
+  aside { display:flex; flex-direction:column; min-height:0; gap:12px; }
+  aside .panel { display:flex; flex-direction:column; padding:10px 10px 6px; }
+  aside .panel.closed > div { display:none; } aside .panel.closed { flex:0 0 auto; }
+  aside .title.toggle { cursor:pointer; }
+  #sess { flex:0 0 auto; }
+  #sess .pr { color:var(--amber); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #sess .st { color:var(--dim); }
+  #agentsP { flex:0 1 auto; max-height:30%; }
+  #agents { overflow:auto; min-height:0; }
+  #agents div, #tools div { display:flex; gap:1ch; white-space:nowrap; overflow:hidden; }
+  #agents .k { width:2ch; flex:none; } #agents .meta { margin-left:auto; color:var(--dim); }
+  #toolsP { flex:1 1 auto; }
+  #tools { overflow:auto; min-height:0; }
+  #tools .t { color:var(--dim); } #tools .who { color:var(--cyan); width:7ch; flex:none; overflow:hidden; }
   #tools .tool { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  #tools .ms { margin-left:auto; color:var(--ov); flex:none; }
-  #tools .more { color:var(--blue); cursor:pointer; justify-content:center; }
-  .ok { color:var(--green); } .bad { color:var(--red); } .run { color:var(--yellow); } .live { color:var(--blue); }
-  .gone { color:var(--ov); }
-  #chat { border-top:1px solid var(--s0); display:flex; flex-direction:column; max-height:40%; min-height:0; }
-  #chat .log { overflow:auto; padding:6px 14px; min-height:0; }
-  #chat .m { margin:4px 0; padding:6px 9px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-word; }
-  #chat .ask { background:var(--s0); color:var(--text); margin-left:18px; }
-  #chat .answer { background:#24243a; color:var(--text); margin-right:18px; border-left:2px solid var(--lav); }
-  #chat .error { background:#2e1f26; color:var(--red); margin-right:18px; }
-  #chat .m small { display:block; color:var(--ov); font-size:10px; margin-top:3px; }
-  #chat form { display:flex; gap:6px; padding:8px 14px; }
-  #chat input { flex:1; min-width:0; background:var(--base); color:var(--text); border:1px solid var(--s1); border-radius:6px; padding:6px 8px; font:inherit; }
-  #chat input:focus { outline:none; border-color:var(--lav); box-shadow:0 0 8px #b4befe66; }
-  #chat button { background:var(--s0); color:var(--text); border:1px solid var(--s1); border-radius:6px; font:inherit; padding:0 10px; cursor:pointer; }
-  #chat button.on { color:var(--green); border-color:var(--green); }
-  #foot { padding:8px 14px; border-top:1px solid var(--s0); color:var(--ov); font-size:11px; }
-  #tip { position:fixed; pointer-events:none; background:var(--s0); color:var(--text); padding:6px 9px;
-         border-radius:6px; font-size:12px; max-width:360px; display:none; box-shadow:0 4px 16px #0008; z-index:5; }
-  #tip b { color:var(--lav); }
-  #strip { position:absolute; top:12px; left:16px; display:flex; gap:10px; align-items:center; font-size:12px;
-           letter-spacing:.1em; text-transform:uppercase; color:var(--sub); pointer-events:none; }
-  #strip .led { width:9px; height:9px; border-radius:50%; background:var(--ov); box-shadow:0 0 8px transparent; transition: background .3s, box-shadow .3s; }
-  #strip.thinking .led { background:var(--blue); box-shadow:0 0 10px var(--blue); animation: breathe 1.2s ease-in-out infinite; }
-  #strip.listening .led { background:var(--green); box-shadow:0 0 10px var(--green); animation: breathe .6s ease-in-out infinite; }
-  #strip.speaking .led { background:var(--mauve); box-shadow:0 0 10px var(--mauve); animation: breathe .4s ease-in-out infinite; }
-  #strip.idle .led { background:var(--teal); }
-  #strip .hint { color:var(--ov); text-transform:none; letter-spacing:0; }
-  @keyframes breathe { 50% { opacity:.4 } }
-  #toasts { position:absolute; top:12px; right:16px; display:flex; flex-direction:column; gap:8px; width:280px; }
-  .toast { background:var(--s0); border-left:3px solid var(--yellow); padding:8px 10px; border-radius:6px; font-size:12px;
-           cursor:pointer; box-shadow:0 6px 20px #000a; animation: slidein .25s ease-out; }
-  .toast.ok { border-color:var(--green); } .toast.ask { border-color:var(--red); }
-  .toast small { display:block; color:var(--ov); }
-  @keyframes slidein { from { opacity:0; transform:translateY(-6px) } to { opacity:1 } }
-  #bar { position:absolute; left:16px; right:16px; bottom:14px; height:26px; display:flex; align-items:center; gap:10px; }
-  #track { flex:1; height:6px; background:var(--s1); border-radius:3px; position:relative; cursor:pointer; }
-  #track .fill { position:absolute; left:0; top:0; bottom:0; background:var(--blue); opacity:.6; border-radius:3px; }
-  #track .knob { position:absolute; top:-5px; width:16px; height:16px; margin-left:-8px; border-radius:50%; background:var(--lav); box-shadow:0 0 8px var(--lav); }
-  #bar button { background:var(--s0); color:var(--text); border:1px solid var(--s1); border-radius:4px; font:inherit; font-size:11px; padding:2px 8px; cursor:pointer; }
-  #bar button.on { color:var(--green); border-color:var(--green); }
-  #bar .when { color:var(--ov); font-size:11px; min-width:9ch; text-align:right; }
-  body.big #strip { font-size:16px; } body.big #bar { display:none; }
+  #tools .tool .to { color:var(--dim); }
+  #tools .ms { margin-left:auto; color:var(--dim); flex:none; }
+  #tools .more { color:var(--cyan); cursor:pointer; }
+  .live { color:var(--cyan); } .ok { color:var(--green); } .bad { color:var(--red); } .warn { color:var(--amber); } .gone { color:var(--dim); }
+  #jarvisP { flex:0 1 auto; max-height:34%; }
+  #chat { overflow:auto; min-height:0; }
+  #chat .m { white-space:pre-wrap; word-break:break-word; margin:0 0 6px; }
+  #chat .m.ask { color:var(--amber); } #chat .m.ask::before { content:"> "; }
+  #chat .m.answer { color:var(--fg); border-left:1px solid var(--rule2); padding-left:1ch; }
+  #chat .m.error { color:var(--red); }
+  #chat .m small { display:block; color:var(--dim); font-size:11px; }
+  #askForm { display:flex; gap:1ch; align-items:center; margin-top:4px; border-top:1px solid var(--rule); padding-top:6px; }
+  #askForm .prompt { color:var(--amber); }
+  #askForm input { flex:1; min-width:0; background:transparent; color:var(--fg); border:0; font:inherit; padding:0; caret-color:var(--amber); }
+  #askForm input:focus { outline:none; }
+  #askForm button { background:transparent; color:var(--dim); border:0; font:inherit; cursor:pointer; padding:0; }
+  #askForm button:hover, #askForm button:focus-visible { color:var(--fg); outline:none; }
+  #askForm button.on { color:var(--green); }
+  #status { grid-column: 1 / -1; display:flex; gap:2ch; color:var(--dim); white-space:nowrap; overflow:hidden; padding:2px 2px 0; }
+  #status .seg b { color:var(--fg); font-weight:400; } #status .seg.jarvis b { color:var(--amber); }
+  #status .right { margin-left:auto; }
+  #bar { position:absolute; left:12px; right:12px; bottom:8px; display:flex; align-items:center; gap:1ch; color:var(--dim); font-size:12px; }
+  #bar button { background:transparent; color:var(--dim); border:0; font:inherit; cursor:pointer; padding:0; }
+  #bar button.on { color:var(--green); }
+  #track { flex:1; height:12px; position:relative; cursor:pointer; background:
+           repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 8px) center / 100% 1px no-repeat; }
+  #track .fill { position:absolute; left:0; top:5px; height:1px; background:var(--cyan); }
+  #track .knob { position:absolute; top:2px; width:7px; height:7px; margin-left:-4px; background:var(--cyan); }
+  #strip { position:absolute; top:8px; right:12px; color:var(--dim); pointer-events:none; }
+  #strip b { color:var(--fg); font-weight:400; } #strip.listening b, #strip.speaking b, #strip.hearing b { color:var(--amber); }
+  #strip.thinking b { color:var(--cyan); }
+  #toasts { position:absolute; top:30px; right:12px; display:flex; flex-direction:column; gap:4px; width:38ch; }
+  .toast { border:1px solid var(--rule2); background:var(--bg2); padding:4px 8px; cursor:pointer; }
+  .toast.ask { border-color:var(--red); } .toast.ok { border-color:var(--green); }
+  .toast small { display:block; color:var(--dim); }
+  #tip { position:fixed; pointer-events:none; background:var(--bg2); color:var(--fg); border:1px solid var(--rule2); padding:4px 8px; max-width:48ch; display:none; z-index:5; white-space:pre-wrap; }
+  #tip b { color:var(--cyan); font-weight:400; }
+  /* wake mode: the one orchestrated moment */
+  #wake { position:absolute; inset:0; display:none; align-items:center; justify-content:center; background:rgba(27,27,26,.82); z-index:4; }
+  body.wake #wake { display:flex; animation: wakein .35s ease-out; }
+  #wake .col { width:72ch; max-width:92%; }
+  #wake .state { color:var(--dim); height:1.5em; }
+  #wake .state b { color:var(--amber); font-weight:400; }
+  #wake .meter { height:2.2em; display:flex; align-items:flex-end; gap:2px; color:var(--amber); font-size:16px; line-height:1; margin:6px 0 10px; }
+  #wake .meter span { display:inline-block; width:1ch; }
+  #wake .heard { min-height:3em; color:var(--fg); white-space:pre-wrap; word-break:break-word; }
+  #wake .heard::before { content:"> "; color:var(--amber); }
+  #wake .heard .cur { display:inline-block; width:1ch; height:1.2em; background:var(--amber); vertical-align:text-bottom; animation: blink 1s steps(1) infinite; }
+  #wake .reply { margin-top:14px; min-height:6em; max-height:50vh; overflow:auto; border-left:1px solid var(--rule2); padding-left:2ch; white-space:pre-wrap; word-break:break-word; color:var(--fg); }
+  #wake .reply.error { color:var(--red); }
+  #wake .foot { margin-top:14px; color:var(--dim); }
+  @keyframes wakein { from { opacity:0 } to { opacity:1 } }
+  @keyframes blink { 50% { opacity:0 } }
+  @media (prefers-reduced-motion: reduce) { body.wake #wake { animation:none } #wake .heard .cur { animation:none } }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <div id="stage">
+  <div id="stage" class="panel"><span class="title" id="stageTitle">session <b>…</b></span>
     <canvas id="c"></canvas>
-    <div id="strip"><span class="led"></span><span class="state">waiting</span><span class="hint" id="hint">click anywhere to enable sound</span></div>
+    <div id="strip"><b>waiting</b></div>
     <div id="toasts"></div>
-    <div id="bar"><button id="liveBtn" class="on">LIVE</button><div id="track"><div class="fill"></div><div class="knob"></div></div><span class="when"></span></div>
+    <div id="bar"><button id="liveBtn" class="on">[live]</button><div id="track"><div class="fill"></div><div class="knob"></div></div><span class="when"></span></div>
+    <div id="wake"><div class="col">
+      <div class="state">listening</div>
+      <div class="meter"></div>
+      <div class="heard"><span class="txt"></span><span class="cur"></span></div>
+      <div class="reply"></div>
+      <div class="foot">speak, or type below and press return. esc closes.</div>
+      <form id="wakeForm" style="display:flex;gap:1ch;margin-top:8px"><span class="prompt" style="color:var(--amber)">&gt;</span><input id="wakeInput" autocomplete="off" maxlength="4000" style="flex:1;background:transparent;border:0;color:var(--fg);font:inherit;caret-color:var(--amber);outline:none"></form>
+    </div></div>
   </div>
   <aside>
-    <h1>Session</h1>
-    <div id="head"><b>waiting for events…</b><div class="st"></div></div>
-    <h1>Agents</h1>
-    <div id="agents"></div>
-    <h1>Tool calls</h1>
-    <div id="tools"></div>
-    <h1>Jarvis</h1>
-    <div id="chat"><div class="log"></div>
-      <form id="askForm"><input id="askInput" placeholder="Ask Jarvis… ( / to focus )" autocomplete="off" maxlength="4000"><button type="button" id="speakBtn" title="speak answers aloud">🔊</button><button type="submit">Ask</button></form>
+    <div class="panel" id="sess"><span class="title">session</span>
+      <div><div class="head"><span class="st">waiting for events</span></div><div class="pr"></div></div>
     </div>
-    <div id="foot">drag to move · double-click unpins · c clear finished · f big screen · m mute · l live · / ask</div>
+    <div class="panel" id="agentsP"><span class="title toggle">agents</span><div id="agents"></div></div>
+    <div class="panel" id="toolsP"><span class="title toggle">tool calls</span><div id="tools"></div></div>
+    <div class="panel" id="jarvisP"><span class="title">jarvis</span>
+      <div id="chat"></div>
+      <form id="askForm"><span class="prompt">&gt;</span><input id="askInput" autocomplete="off" maxlength="4000" placeholder="ask ( / )"><button type="button" id="speakBtn">[speak: on]</button></form>
+    </div>
   </aside>
+  <div id="status"><span class="seg">state <b id="stState">waiting</b></span><span class="seg">agents <b id="stAgents">0</b></span><span class="seg">live <b id="stLive">0</b></span><span class="seg">sound <b id="stSound">off</b></span><span class="right">drag moves · dblclick unpins · c clear · f big · m mute · l live · / ask · esc</span></div>
 </div>
 <div id="tip"></div>
 <script type="module">
 import { Model, MAIN, links, fold } from './model.mjs'
 
-const C = { base:'#1e1e2e', s0:'#313244', s1:'#45475a', text:'#cdd6f4', sub:'#a6adc8', ov:'#6c7086',
-            blue:'#89b4fa', lav:'#b4befe', green:'#a6e3a1', yellow:'#f9e2af', red:'#f38ba8',
-            peach:'#fab387', teal:'#94e2d5', mauve:'#cba6f7' }
-const STATUS_COLOR = { running:C.blue, starting:C.yellow, done:C.green, failed:C.red, gone:C.ov, idle:C.teal }
-const TARGET_COLOR = { file:C.peach, host:C.teal, mcp:C.mauve }
-const NOTE_LABEL = { permission_prompt:'Needs permission', idle_prompt:'Waiting for you', agent_needs_input:'Agent needs input', agent_completed:'Agent finished' }
+const C = { bg:'#1b1b1a', fg:'#d3d1c7', dim:'#6f6e68', rule:'#363632', rule2:'#4a4944', cyan:'#8fb8c8', amber:'#d9a85c', red:'#c96a6a', green:'#9bb58a' }
+const STATUS_COLOR = { running:C.cyan, starting:C.amber, done:C.dim, failed:C.red, gone:C.rule2, idle:C.fg }
+const TARGET_COLOR = { file:C.dim, host:C.cyan, mcp:C.amber }
+const NOTE_LABEL = { permission_prompt:'needs permission', idle_prompt:'waiting for you', agent_needs_input:'agent needs input', agent_completed:'agent finished' }
 const HEX_ID = /^[0-9a-f]{8,}$/
 const HUD_TOKEN = '__HUD_TOKEN__' // filled in by the server for this run
 const TARGETS_SHOWN = 24
 const el = id => document.getElementById(id)
+const params = new URLSearchParams(location.search), wanted = params.get('session')
+if (params.get('big')) document.body.classList.add('big')
+if (params.get('wake')) document.body.classList.add('wake')
 
 // ---------- data ----------
 const model = new Model()
-const params = new URLSearchParams(location.search), wanted = params.get('session')
-if (params.get('big')) document.body.classList.add('big') // ?big=1: label-free big-screen mode from the start
 const liveSession = () => (wanted ? model.sessions.get(wanted) : model.latest()) || null
 let synced = false, dirty = true
-let scrub = null // {ts, S} when the history scrubber is engaged
+let scrub = null
 const session = () => scrub ? scrub.S : liveSession()
 const es = new EventSource('/events' + (wanted ? `?session=${encodeURIComponent(wanted)}` : ''))
 es.onmessage = e => { try { model.ingest(JSON.parse(e.data)) } catch {} ; if (synced) dirty = true }
 es.addEventListener('synced', () => { synced = true; dirty = true })
-es.onerror = () => { document.querySelector('#head .st').textContent = 'reconnecting…' }
+es.onerror = () => { document.querySelector('#sess .st').textContent = 'reconnecting' }
 
 // ---------- sound: unlocked by the first click or key, m mutes ----------
 let audio = null, muted = false
-const unlock = () => { if (!audio) { audio = new (window.AudioContext || window.webkitAudioContext)(); el('hint').textContent = '' } if (audio.state === 'suspended') audio.resume() }
+const unlock = () => { if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); el('stSound').textContent = muted ? 'muted' : 'on' }
 addEventListener('pointerdown', unlock, { once: true }); addEventListener('keydown', unlock, { once: true })
-function tone(freq, ms, gain = 0.05, type = 'sine', slide = 0) {
+function tone(freq, ms, gain = 0.04, type = 'sine', slide = 0) {
   if (!audio || muted || scrub) return
   const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime
   o.type = type; o.frequency.setValueAtTime(freq, t); if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + ms / 1000)
   g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0005, t + ms / 1000)
   o.connect(g).connect(audio.destination); o.start(t); o.stop(t + ms / 1000 + 0.02)
 }
-const SOUND = { tick: () => tone(1500, 40, 0.025), chime: () => { tone(880, 160, 0.05); setTimeout(() => tone(1320, 260, 0.05), 110) },
-                fail: () => tone(220, 300, 0.06, 'sawtooth', 110), prompt: () => tone(660, 90, 0.03), note: () => { tone(988, 120, 0.05); setTimeout(() => tone(740, 200, 0.05), 140) } }
+const SOUND = { tick: () => tone(1500, 30, 0.015), chime: () => { tone(880, 140, 0.04); setTimeout(() => tone(1320, 220, 0.04), 100) },
+                fail: () => tone(220, 280, 0.05, 'sawtooth', 110), prompt: () => tone(660, 80, 0.025), note: () => { tone(988, 110, 0.04); setTimeout(() => tone(740, 180, 0.04), 130) } }
 
 // ---------- layout ----------
 const canvas = el('c'), ctx = canvas.getContext('2d')
-const pos = new Map() // node id -> {x, y, vx, vy, born}
-const pinned = new Set()
+const pos = new Map(), pinned = new Set()
 let W = 0, H = 0, settleUntil = 0
 function resize() {
   const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1
@@ -158,15 +173,15 @@ function resize() {
 addEventListener('resize', resize); resize()
 const hash = s => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h >>> 0 }
 const big = () => document.body.classList.contains('big')
-const scale = () => big() ? 1.6 : 1
+const scale = () => big() ? 1.5 : 1
 
 function place(S, drawn, now) {
-  for (const [a, b] of S.rekeyed.splice(0)) if (pos.has(a) && !pos.has(b)) { pos.set(b, pos.get(a)); pos.delete(a) } // a spawn keeps its spot when it gets its agent id
+  for (const [a, b] of S.rekeyed.splice(0)) if (pos.has(a) && !pos.has(b)) { pos.set(b, pos.get(a)); pos.delete(a) }
   let changed = false
   for (const n of drawn) {
     if (pos.has(n.id)) continue
     const p = pos.get(n.parent) || { x: W / 2, y: H / 2 }
-    const a = (hash(n.id) % 628) / 100 // stable pseudo-random angle: no two nodes start on the same spot
+    const a = (hash(n.id) % 628) / 100
     pos.set(n.id, { x: p.x + Math.cos(a) * 40 + (Math.random() - .5), y: p.y + Math.sin(a) * 40 + (Math.random() - .5), vx: 0, vy: 0, born: now })
     changed = true
   }
@@ -176,7 +191,7 @@ function place(S, drawn, now) {
 }
 function step(drawn, now) {
   const main = pos.get(MAIN); main.x = W / 2; main.y = H / 2
-  if (now > settleUntil) return // settled: hold still until something changes
+  if (now > settleUntil) return
   const k = scale()
   for (let i = 0; i < drawn.length; i++) {
     const a = pos.get(drawn[i].id)
@@ -197,33 +212,33 @@ function step(drawn, now) {
     const want = (n.parent === MAIN ? 170 : 110) * k
     const f = (d - want) * 0.02
     p.vx += f * dx / d; p.vy += f * dy / d
-    p.vx += (W / 2 - p.x) * 0.0015; p.vy += (H / 2 - p.y) * 0.0015 // weak gravity keeps strays on screen
+    p.vx += (W / 2 - p.x) * 0.0015; p.vy += (H / 2 - p.y) * 0.0015
     p.vx *= 0.82; p.vy *= 0.82
-    if (Math.abs(p.vx) < 0.03) p.vx = 0; if (Math.abs(p.vy) < 0.03) p.vy = 0 // dead zone: no slow drift
+    if (Math.abs(p.vx) < 0.03) p.vx = 0; if (Math.abs(p.vy) < 0.03) p.vy = 0
     p.x = Math.min(W - 40, Math.max(40, p.x + p.vx)); p.y = Math.min(H - 40, Math.max(40, p.y + p.vy))
   }
 }
-// destinations sit on a ring around the graph, newest-touched TARGETS_SHOWN of them, in order of first use
 function targetRing(S) {
   const all = [...S.targets.values()].sort((a, b) => b.last - a.last).slice(0, TARGETS_SHOWN).sort((a, b) => a.id < b.id ? -1 : 1)
-  const rx = W / 2 - 180 * scale(), ry = H / 2 - 70 * scale(), out = new Map() // an ellipse: room for labels at the sides, the bar below
+  const rx = W / 2 - 190 * scale(), ry = H / 2 - 64 * scale(), out = new Map()
   all.forEach((t, i) => { const a = -Math.PI / 2 + (i / all.length) * Math.PI * 2; out.set(t.id, { t, x: W / 2 + Math.cos(a) * rx, y: H / 2 + Math.sin(a) * ry }) })
   return out
 }
 
 // ---------- effects driven by changes in the session ----------
 const fx = { flashes: new Map(), pulses: [], hits: [], bubbles: [], swellAt: -1e9, seen: null, status: new Map(), sid: null }
-function watch(S, now, tsec) {
+let lastTick = 0
+function watch(S, now) {
   if (fx.sid !== S.id) { Object.assign(fx, { flashes: new Map(), pulses: [], hits: [], bubbles: [], seen: { ...S.counts }, status: new Map(), sid: S.id }); return }
   const fresh = (arr, key) => { const n = Math.min(arr.length, S.counts[key] - fx.seen[key]); fx.seen[key] = S.counts[key]; return n > 0 ? arr.slice(-n) : [] }
   for (const c of fresh(S.calls, 'calls')) { fx.flashes.set(c.agent.id, { tool: c.tool, at: now }); if (now - lastTick > 60) { SOUND.tick(); lastTick = now } }
   for (const h of fresh(S.hits, 'hits')) fx.hits.push({ ...h, at: now })
   for (const p of fresh(S.prompts, 'prompts')) { fx.bubbles.push({ text: p.text, at: now }); SOUND.prompt() }
-  for (const n of fresh(S.notes, 'notes')) { toast(NOTE_LABEL[n.kind] || n.kind, n.kind === 'permission_prompt' || n.kind === 'agent_needs_input' ? 'ask' : '', now); SOUND.note() }
+  for (const n of fresh(S.notes, 'notes')) { toast(NOTE_LABEL[n.kind] || n.kind, n.kind === 'permission_prompt' || n.kind === 'agent_needs_input' ? 'ask' : ''); SOUND.note() }
   for (const [nid, n] of S.nodes) {
     const was = fx.status.get(nid)
     if (was && was !== n.status) {
-      if (nid === MAIN && n.status === 'idle' && was === 'running') { toast('Claude finished', 'ok', now); SOUND.chime() }
+      if (nid === MAIN && n.status === 'idle' && was === 'running') { toast('claude finished', 'ok'); SOUND.chime() }
       if (nid !== MAIN && (n.status === 'done' || n.status === 'failed')) {
         fx.pulses.push({ from: nid, to: n.parent, at: now, color: n.status === 'done' ? C.green : C.red }); fx.swellAt = now + 500
         n.status === 'done' ? SOUND.chime() : SOUND.fail()
@@ -234,135 +249,125 @@ function watch(S, now, tsec) {
   if (fx.hits.length > 60) fx.hits.splice(0, fx.hits.length - 60)
   fx.pulses = fx.pulses.filter(p => now - p.at < 900); fx.bubbles = fx.bubbles.filter(b => now - b.at < 7000)
 }
-let lastTick = 0
-function toast(text, cls, now) {
-  const d = document.createElement('div'); d.className = `toast ${cls}`; d.innerHTML = `${esc(text)}<small>${new Date().toTimeString().slice(0, 8)} · click to focus the terminal</small>`
+function toast(text, cls) {
+  const d = document.createElement('div'); d.className = `toast ${cls}`; d.innerHTML = `${esc(text)}<small>${clock(Date.now() / 1000)} · click to focus the terminal</small>`
   d.onclick = () => { fetch('/focus', { method: 'POST' }).catch(() => {}); d.remove() }
   el('toasts').prepend(d); setTimeout(() => d.remove(), 8000)
   while (el('toasts').children.length > 4) el('toasts').lastChild.remove()
 }
 
-// ---------- drawing ----------
+// ---------- drawing: thin lines, no glow ----------
 const tagOf = n => n.kind === 'fold' ? n.alias : HEX_ID.test(n.id) ? n.id.slice(0, 6) : n.id === MAIN ? 'main' : n.id.slice(-6)
 const tokensOf = n => n.tokens ? (n.tokens.input_tokens || 0) + (n.tokens.cache_read_input_tokens || 0) + (n.tokens.cache_creation_input_tokens || 0) + (n.tokens.output_tokens || 0) : 0
-const radiusOf = n => (n.id === MAIN ? 26 : n.kind === 'fold' ? 17 : 19 + Math.min(12, Math.log10(1 + tokensOf(n) / 1000) * 6)) * scale() // heavier with tokens
+const radiusOf = n => (n.id === MAIN ? 24 : n.kind === 'fold' ? 16 : 17 + Math.min(10, Math.log10(1 + tokensOf(n) / 1000) * 5)) * scale()
 const shortTool = t => t.replace(/^mcp__(plugin_)?/, '').replace(/^([^_]+)_\1__/, '$1:').replace(/__/, ':')
 const shortTarget = t => { const s = t.kind === 'file' ? t.id.split('/').slice(-2).join('/') : t.id; return s.length > 26 ? '…' + s.slice(-25) : s }
 const bezier = (a, b, bend) => { const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1; return { cx: mx - dy / d * bend, cy: my + dx / d * bend } }
 const onCurve = (a, c, b, t) => ({ x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * c.cx + t * t * b.x, y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * c.cy + t * t * b.y })
-const font = px => `${px * scale()}px ui-monospace, Menlo, monospace`
+const font = px => `${px * scale()}px "SF Mono", Menlo, monospace`
 
 function draw(S, drawn, edges, ring, now, tsec) {
   ctx.clearRect(0, 0, W, H)
   const k = scale()
-  // destination ring, behind everything
   for (const { t, x, y } of ring.values()) {
-    const idle = Math.min(1, (tsec - t.last) / 60), col = TARGET_COLOR[t.kind] || C.sub
-    const hot = Math.max(0, 1 - (tsec - t.last) / 1.5)
-    ctx.globalAlpha = 0.25 + 0.6 * (1 - idle)
-    if (hot > 0) { ctx.shadowColor = col; ctx.shadowBlur = 20 * hot }
-    ctx.beginPath(); ctx.fillStyle = C.base; ctx.strokeStyle = col; ctx.lineWidth = 1.5
-    if (t.kind === 'file') ctx.rect(x - 6 * k, y - 7 * k, 12 * k, 14 * k); else if (t.kind === 'host') ctx.arc(x, y, 7 * k, 0, 7); else { ctx.moveTo(x, y - 8 * k); ctx.lineTo(x + 8 * k, y); ctx.lineTo(x, y + 8 * k); ctx.lineTo(x - 8 * k, y); ctx.closePath() }
-    ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0
-    if (!big()) { ctx.fillStyle = col; ctx.font = font(10); ctx.textAlign = x < W / 2 ? 'right' : 'left'; ctx.fillText(shortTarget(t), x + (x < W / 2 ? -12 : 12), y + 4) }
+    const idle = Math.min(1, (tsec - t.last) / 60), col = TARGET_COLOR[t.kind] || C.dim, hot = tsec - t.last < 1.5
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - idle); ctx.lineWidth = hot ? 2 : 1; ctx.strokeStyle = hot ? C.fg : col; ctx.fillStyle = C.bg
+    ctx.beginPath()
+    if (t.kind === 'file') ctx.rect(x - 5 * k, y - 6 * k, 10 * k, 12 * k); else if (t.kind === 'host') ctx.arc(x, y, 6 * k, 0, 7); else { ctx.moveTo(x, y - 7 * k); ctx.lineTo(x + 7 * k, y); ctx.lineTo(x, y + 7 * k); ctx.lineTo(x - 7 * k, y); ctx.closePath() }
+    ctx.fill(); ctx.stroke()
+    if (!big()) { ctx.fillStyle = col; ctx.font = font(11); ctx.textAlign = x < W / 2 ? 'right' : 'left'; ctx.fillText(shortTarget(t), x + (x < W / 2 ? -11 : 11), y + 4) }
   }
   ctx.globalAlpha = 1
-  // dots flying from an agent to the file, host or server it just touched
   for (const h of fx.hits) {
     const a = pos.get(h.from) || pos.get(MAIN), b = ring.get(h.target); if (!a || !b) continue
     const t = (now - h.at) / 700; if (t > 1) continue
     const c = bezier(a, b, 30), p = onCurve(a, c, b, t)
-    ctx.globalAlpha = 1 - t * 0.6; ctx.fillStyle = TARGET_COLOR[b.t.kind] || C.sub
-    ctx.beginPath(); ctx.arc(p.x, p.y, 3 * k, 0, 7); ctx.fill()
-    ctx.strokeStyle = ctx.fillStyle; ctx.globalAlpha = 0.25 * (1 - t); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(c.cx, c.cy, b.x, b.y); ctx.stroke()
+    ctx.strokeStyle = C.rule2; ctx.globalAlpha = 0.6 * (1 - t); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(c.cx, c.cy, b.x, b.y); ctx.stroke()
+    ctx.globalAlpha = 1 - t * 0.5; ctx.fillStyle = TARGET_COLOR[b.t.kind] || C.dim; ctx.fillRect(p.x - 2 * k, p.y - 2 * k, 4 * k, 4 * k)
   }
   fx.hits = fx.hits.filter(h => now - h.at < 700)
-  // edges
   for (const l of edges) {
     const a = pos.get(l.from), b = pos.get(l.to); if (!a || !b) continue
     const bend = ((hash(l.from + l.to) % 40) - 20) * (l.kind === 'message' ? 2 : 1)
     const c = bezier(a, b, bend), live = l.flowing
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(c.cx, c.cy, b.x, b.y)
-    ctx.setLineDash(l.kind === 'message' ? [6, 6] : []); ctx.lineWidth = live ? 1.8 : 1
-    ctx.strokeStyle = live ? (l.kind === 'message' ? C.mauve : C.blue) : C.s1; ctx.globalAlpha = live ? 0.9 : 0.5
+    ctx.setLineDash(l.kind === 'message' ? [4, 4] : []); ctx.lineWidth = 1
+    ctx.strokeStyle = live ? (l.kind === 'message' ? C.amber : C.cyan) : C.rule2; ctx.globalAlpha = live ? 0.9 : 0.7
     ctx.stroke(); ctx.setLineDash([])
     if (live && !scrub) {
-      ctx.fillStyle = l.kind === 'message' ? C.mauve : C.lav
+      ctx.fillStyle = l.kind === 'message' ? C.amber : C.cyan
       for (let i = 0; i < 3; i++) {
         let t = ((now / 1400) + i / 3 + (hash(l.to) % 100) / 100) % 1; if (l.back) t = 1 - t
-        const p = onCurve(a, c, b, t); ctx.globalAlpha = 0.35 + 0.65 * Math.sin(t * Math.PI)
-        ctx.beginPath(); ctx.arc(p.x, p.y, 2.6 * k, 0, 7); ctx.fill()
+        const p = onCurve(a, c, b, t); ctx.globalAlpha = 0.3 + 0.7 * Math.sin(t * Math.PI)
+        ctx.fillRect(p.x - 2 * k, p.y - 2 * k, 4 * k, 4 * k)
       }
     }
   }
-  // return pulses: one bright dot racing back to the parent when an agent finishes
   for (const p of fx.pulses) {
     const a = pos.get(p.from), b = pos.get(p.to); if (!a || !b) continue
     const t = Math.min(1, (now - p.at) / 600), c = bezier(a, b, ((hash(p.to + p.from) % 40) - 20)), q = onCurve(a, c, b, t)
-    ctx.globalAlpha = 1; ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 16
-    ctx.beginPath(); ctx.arc(q.x, q.y, 5 * k, 0, 7); ctx.fill(); ctx.shadowBlur = 0
+    ctx.globalAlpha = 1; ctx.fillStyle = p.color; ctx.fillRect(q.x - 3 * k, q.y - 3 * k, 6 * k, 6 * k)
   }
   ctx.globalAlpha = 1
-  // nodes
   for (const n of drawn) {
     const p = pos.get(n.id), isMain = n.id === MAIN
     let r = radiusOf(n)
-    if (isMain && now < fx.swellAt) r *= 1 + 0.25 * Math.sin((fx.swellAt - now) / 500 * Math.PI)
-    const col = STATUS_COLOR[n.status] || C.sub
+    if (isMain && now < fx.swellAt) r *= 1 + 0.2 * Math.sin((fx.swellAt - now) / 500 * Math.PI)
+    const col = STATUS_COLOR[n.status] || C.fg
     const grow = Math.max(0, Math.min(1, (now - p.born) / 400))
-    ctx.globalAlpha = (n.isLive || isMain ? 1 : 0.45) * grow
-    if ((n.isLive || (isMain && n.status === 'running')) && !scrub) { const pulse = 0.5 + 0.5 * Math.sin(now / 350 + hash(n.id)); ctx.shadowColor = col; ctx.shadowBlur = 18 + 14 * pulse }
-    ctx.beginPath(); ctx.arc(p.x, p.y, r * grow, 0, 7); ctx.fillStyle = C.base; ctx.fill()
-    ctx.lineWidth = isMain ? 3 : 2; ctx.strokeStyle = col; if (n.kind === 'fold') ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0
-    if (pinned.has(n.id)) { ctx.fillStyle = C.yellow; ctx.beginPath(); ctx.arc(p.x + r * 0.7, p.y - r * 0.7, 2.5 * k, 0, 7); ctx.fill() }
-    if (n.isLive && !isMain && !scrub) { ctx.beginPath(); ctx.arc(p.x, p.y, r + 5 * k, now / 300, now / 300 + 1.6); ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke() }
-    ctx.fillStyle = col; ctx.font = font(isMain ? 12 : 9); ctx.textAlign = 'center'
+    ctx.globalAlpha = (n.isLive || isMain ? 1 : 0.6) * grow
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * grow, 0, 7); ctx.fillStyle = C.bg; ctx.fill()
+    ctx.lineWidth = isMain ? 2 : 1; ctx.strokeStyle = col; if (n.kind === 'fold') ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([])
+    if (pinned.has(n.id)) { ctx.fillStyle = C.amber; ctx.fillRect(p.x + r * 0.7 - 2, p.y - r * 0.7 - 2, 4, 4) }
+    if (n.isLive && !scrub) { ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 * k, now / 300, now / 300 + 1.4); ctx.lineWidth = 1; ctx.strokeStyle = col; ctx.stroke() }
+    ctx.fillStyle = col; ctx.font = font(isMain ? 12 : 10); ctx.textAlign = 'center'
     ctx.fillText(isMain ? (n.task || 'main') : tagOf(n), p.x, p.y + 4 * k)
-    if (!big() || n.kind !== 'fold') { ctx.fillStyle = C.sub; ctx.font = font(11); ctx.fillText(isMain ? n.status : n.kind === 'fold' ? '' : n.kind, p.x, p.y + r + 15 * k) }
-    const fl = fx.flashes.get(n.id) // the tool an agent just used, shown for a second
-    if (fl && now - fl.at < 1100) { ctx.globalAlpha = Math.min(1, (1100 - (now - fl.at)) / 400); ctx.fillStyle = C.yellow; ctx.font = font(10); ctx.fillText(shortTool(fl.tool), p.x, p.y - r - 8 * k) }
+    if (!big() || n.kind !== 'fold') { ctx.fillStyle = C.dim; ctx.font = font(11); ctx.fillText(isMain ? n.status : n.kind === 'fold' ? '' : n.kind, p.x, p.y + r + 14 * k) }
+    const fl = fx.flashes.get(n.id)
+    if (fl && now - fl.at < 1100) { ctx.globalAlpha = Math.min(1, (1100 - (now - fl.at)) / 400); ctx.fillStyle = C.fg; ctx.font = font(11); ctx.fillText(shortTool(fl.tool), p.x, p.y - r - 7 * k) }
   }
-  // prompt bubbles at main
   const m = pos.get(MAIN)
   fx.bubbles.forEach((b, i) => {
     const age = now - b.at, a = age < 300 ? age / 300 : age > 6000 ? Math.max(0, 1 - (age - 6000) / 1000) : 1
-    const text = b.text.length > 56 ? b.text.slice(0, 55) + '…' : b.text
-    ctx.font = font(12); const w = ctx.measureText(text).width + 20 * k, h = 24 * k, x = m.x - w / 2, y = m.y - 60 * k - i * 30 * k
-    ctx.globalAlpha = a * 0.95; ctx.fillStyle = C.s0; ctx.beginPath(); ctx.roundRect(x, y - h / 2, w, h, 8 * k); ctx.fill()
-    ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.fillText(text, m.x, y + 4 * k)
+    const text = '> ' + (b.text.length > 56 ? b.text.slice(0, 55) + '…' : b.text)
+    ctx.font = font(12); const w = ctx.measureText(text).width + 16 * k, h = 22 * k, x = m.x - w / 2, y = m.y - 56 * k - i * 26 * k
+    ctx.globalAlpha = a; ctx.fillStyle = C.bg; ctx.fillRect(x, y - h / 2, w, h); ctx.strokeStyle = C.rule2; ctx.lineWidth = 1; ctx.strokeRect(x + .5, y - h / 2 + .5, w, h)
+    ctx.fillStyle = C.amber; ctx.textAlign = 'center'; ctx.fillText(text, m.x, y + 4 * k)
   })
   ctx.globalAlpha = 1
 }
 
-// ---------- side panel, strip, scrubber ----------
-const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) // text and attributes: log data is untrusted
+// ---------- panels, status line, scrubber ----------
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
 const fmtMs = ms => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 const elapsed = (n, tsec) => { const s = Math.max(0, Math.round((n.end ?? tsec) - n.start)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}` }
-const cls = st => ({ running: 'live', starting: 'run', done: 'ok', failed: 'bad', gone: 'gone', idle: 'ok' }[st] || '')
+const cls = st => ({ running: 'live', starting: 'warn', done: 'ok', failed: 'bad', gone: 'gone', idle: 'ok' }[st] || '')
+const mark = n => n.isLive ? '*' : n.status === 'failed' ? 'x' : n.status === 'gone' ? '-' : '+'
 const clock = ts => new Date(ts * 1000).toTimeString().slice(0, 8)
 let lastPanel = 0, moreTools = false
 function panel(S, tsec) {
-  const main = S.nodes.get(MAIN), live = [...S.nodes.values()].filter(n => n.id !== MAIN && n.isLive).length
-  const last = S.prompts.at(-1)
-  el('head').innerHTML = `<b>${esc(main.task || S.id.slice(0, 8))}</b> <span class="${cls(main.status)}">${main.status}</span>` +
-    `<div class="st">${S.nodes.size - 1} agents · ${live} live · ${S.targets.size} destinations</div>` + (last ? `<div class="pr" title="${esc(last.text)}">› ${esc(last.text)}</div>` : '')
-  const rows = [...S.nodes.values()].filter(n => n.id !== MAIN).sort((a, b) => b.start - a.start).map(n =>
-    `<div><span class="dot ${cls(n.status)}">${n.isLive ? '●' : n.status === 'failed' ? '✗' : n.status === 'gone' ? '○' : '✓'}</span>` +
-    `<span>${esc(n.kind)}</span><span class="${cls(n.status)}">${esc(tagOf(n))}</span><span class="meta">${n.tools} calls · ${elapsed(n, tsec)}</span></div>`)
-  el('agents').innerHTML = rows.join('') || '<div class="gone">no agents yet</div>'
+  const main = S.nodes.get(MAIN), live = [...S.nodes.values()].filter(n => n.id !== MAIN && n.isLive).length, last = S.prompts.at(-1)
+  el('stageTitle').innerHTML = `session <b>${esc(main.task || S.id.slice(0, 8))}</b>`
+  document.querySelector('#sess .head').innerHTML = `<span class="st">${esc(main.task || S.id.slice(0, 8))} · ${S.nodes.size - 1} agents · ${S.targets.size} destinations</span>`
+  document.querySelector('#sess .pr').textContent = last ? '> ' + last.text : ''
+  document.querySelector('#sess .pr').title = last ? last.text : ''
+  el('agents').innerHTML = [...S.nodes.values()].filter(n => n.id !== MAIN).sort((a, b) => b.start - a.start).map(n =>
+    `<div><span class="k ${cls(n.status)}">${mark(n)}</span><span>${esc(n.kind)}</span><span class="${cls(n.status)}">${esc(tagOf(n))}</span><span class="meta">${n.tools} calls ${elapsed(n, tsec)}</span></div>`).join('') || '<div class="gone">no agents yet</div>'
   const shown = S.calls.slice(moreTools ? -200 : -15).reverse()
   el('tools').innerHTML = shown.map(c =>
     `<div><span class="t">${clock(c.ts)}</span><span class="who">${esc(c.agent.id === MAIN ? 'main' : tagOf(c.agent))}</span>` +
-    `<span class="tool ${c.status === 'failed' ? 'bad' : 'ok'}" title="${esc(c.target || '')}">${esc(shortTool(c.tool))}${c.target ? ` <span class="gone">→ ${esc(c.targetKind === 'file' ? c.target.split('/').pop() : c.target)}</span>` : ''}</span><span class="ms">${fmtMs(c.ms)}</span></div>`).join('') +
-    (S.calls.length > 15 ? `<div class="more">${moreTools ? 'show fewer' : `show all ${S.calls.length}`}</div>` : '')
+    `<span class="tool ${c.status === 'failed' ? 'bad' : ''}" title="${esc(c.target || '')}">${esc(shortTool(c.tool))}${c.target ? ` <span class="to">${esc(c.targetKind === 'file' ? c.target.split('/').pop() : c.target)}</span>` : ''}</span><span class="ms">${fmtMs(c.ms)}</span></div>`).join('') +
+    (S.calls.length > 15 ? `<div class="more">${moreTools ? '[fewer]' : `[all ${S.calls.length}]`}</div>` : '')
+  el('stAgents').textContent = S.nodes.size - 1; el('stLive').textContent = live
 }
 el('tools').addEventListener('click', e => { if (e.target.classList.contains('more')) { moreTools = !moreTools; dirty = true } })
-for (const h of document.querySelectorAll('aside h1')) h.onclick = () => h.classList.toggle('closed')
+for (const h of document.querySelectorAll('aside .title.toggle')) h.onclick = () => h.parentElement.classList.toggle('closed')
+const jarvisState = tsec => model.state && tsec - model.state.ts < 30 && model.state.name !== 'idle' ? model.state.name : null
 function strip(S, tsec) {
-  const main = S.nodes.get(MAIN)
-  const j = model.state && tsec - model.state.ts < 20 && model.state.name !== 'idle' ? model.state.name : null // Jarvis: listening / thinking / speaking
+  const main = S.nodes.get(MAIN), j = jarvisState(tsec)
   const state = scrub ? 'replay' : j || (main.status === 'running' ? 'thinking' : main.status === 'idle' ? 'idle' : main.status)
-  el('strip').className = state; document.querySelector('#strip .state').textContent = state === 'idle' ? 'idle · waiting for you' : state
+  el('strip').className = state; el('strip').innerHTML = `<b>${esc(state)}</b>${j ? ' · jarvis' : ''}`
+  el('stState').textContent = state
 }
 const track = el('track')
 function scrubTo(frac) {
@@ -371,74 +376,108 @@ function scrubTo(frac) {
   const S = model.replayTo(L.id, ts).latest(); if (S) scrub = { ts, S }
   dirty = true
 }
-let scrubbing = false
+let scrubbing = false, lastScrub = 0
 track.addEventListener('pointerdown', e => { scrubbing = true; track.setPointerCapture(e.pointerId); scrubTo(e.offsetX / track.clientWidth) })
-track.addEventListener('pointermove', e => { if (scrubbing && now0() - lastScrub > 80) { lastScrub = now0(); scrubTo(e.offsetX / track.clientWidth) } })
+track.addEventListener('pointermove', e => { if (scrubbing && performance.now() - lastScrub > 80) { lastScrub = performance.now(); scrubTo(e.offsetX / track.clientWidth) } })
 track.addEventListener('pointerup', () => { scrubbing = false })
-let lastScrub = 0; const now0 = () => performance.now()
 const goLive = () => { scrub = null; dirty = true }
 el('liveBtn').onclick = goLive
-function bar(S) {
+function bar() {
   const L = liveSession(); if (!L) return
   const frac = scrub ? (scrub.ts - L.start) / Math.max(1, L.last - L.start) : 1
   track.querySelector('.fill').style.width = `${frac * 100}%`; track.querySelector('.knob').style.left = `${frac * 100}%`
-  el('liveBtn').classList.toggle('on', !scrub); document.querySelector('#bar .when').textContent = scrub ? clock(scrub.ts) : clock(L.last)
+  el('liveBtn').classList.toggle('on', !scrub); el('liveBtn').textContent = scrub ? '[replay]' : '[live]'
+  document.querySelector('#bar .when').textContent = scrub ? clock(scrub.ts) : clock(L.last)
 }
 
-// ---------- Jarvis chat: the exchange arrives as `chat` events; a wake word focuses the input ----------
-const chatLog = document.querySelector('#chat .log'), askInput = el('askInput'), speakBtn = el('speakBtn')
+// ---------- Jarvis: chat panel, wake mode, live transcript ----------
+const chatLog = el('chat'), askInput = el('askInput'), speakBtn = el('speakBtn')
+const wake = { root: el('wake'), state: document.querySelector('#wake .state'), meter: document.querySelector('#wake .meter'), heard: document.querySelector('#wake .heard .txt'), reply: document.querySelector('#wake .reply'), input: el('wakeInput') }
 let speak = localStorage.getItem('hud.speak') !== '0'
-speakBtn.classList.toggle('on', speak)
-speakBtn.onclick = () => { speak = !speak; localStorage.setItem('hud.speak', speak ? '1' : '0'); speakBtn.classList.toggle('on', speak) }
+speakBtn.textContent = `[speak: ${speak ? 'on' : 'off'}]`; speakBtn.classList.toggle('on', speak)
+speakBtn.onclick = () => { speak = !speak; localStorage.setItem('hud.speak', speak ? '1' : '0'); speakBtn.textContent = `[speak: ${speak ? 'on' : 'off'}]`; speakBtn.classList.toggle('on', speak) }
 function addChat(kind, text, meta) {
   const d = document.createElement('div'); d.className = `m ${kind}`
   d.innerHTML = esc(text) + (meta ? `<small>${esc(meta)}</small>` : '')
   chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight
   while (chatLog.children.length > 60) chatLog.firstChild.remove()
 }
+let typer = null, wakeIdleAt = 0
+function typeOut(elm, text, cls) {
+  clearInterval(typer); elm.className = 'reply ' + (cls || ''); elm.textContent = ''
+  let i = 0
+  typer = setInterval(() => { i += 2; elm.textContent = text.slice(0, i); elm.scrollTop = elm.scrollHeight; if (i >= text.length) clearInterval(typer) }, 12)
+}
+function enterWake(state) {
+  document.body.classList.add('wake'); setWake(state); wakeIdleAt = 0
+}
+function leaveWake() { document.body.classList.remove('wake'); clearInterval(typer); wake.heard.textContent = ''; wake.reply.textContent = '' }
+function setWake(state) {
+  wake.state.innerHTML = ({ listening: '<b>listening</b>', hearing: '<b>listening</b>', thinking: 'thinking', speaking: '<b>speaking</b>', idle: 'done. say more, or esc' })[state] || esc(state)
+  wake.root.dataset.state = state
+}
 es.addEventListener('chat', e => {
   let m; try { m = JSON.parse(e.data) } catch { return }
-  if (m.kind === 'ask') addChat('ask', m.text)
-  else addChat(m.kind, m.text, m.cost != null ? `$${Number(m.cost).toFixed(2)} · ${fmtMs(m.ms)}` : '')
-  if (m.kind === 'answer') SOUND.chime()
+  if (m.kind === 'hearing') { if (!document.body.classList.contains('wake')) enterWake('listening'); wake.heard.textContent = m.text; return }
+  if (m.kind === 'ask') { addChat('ask', m.text); if (document.body.classList.contains('wake')) { wake.heard.textContent = m.text; wake.reply.textContent = ''; setWake('thinking') } }
+  else {
+    addChat(m.kind, m.text, m.cost != null ? `$${Number(m.cost).toFixed(2)} ${fmtMs(m.ms)}` : '')
+    if (document.body.classList.contains('wake')) typeOut(wake.reply, m.text, m.kind === 'error' ? 'error' : '')
+    if (m.kind === 'answer') SOUND.chime()
+  }
 })
-el('askForm').onsubmit = async e => {
-  e.preventDefault()
-  const text = askInput.value.trim(); if (!text) return
-  askInput.value = ''
+async function ask(text, input) {
+  if (!text) return
+  input.value = ''
   const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN }, body: JSON.stringify({ text, speak }) }).catch(() => null)
-  if (!r || !r.ok) addChat('error', r && r.status === 409 ? 'Jarvis is still answering the last one' : 'could not reach the server')
+  if (!r || !r.ok) addChat('error', r && r.status === 409 ? 'jarvis is still answering the last one' : 'the server did not take the question')
 }
+el('askForm').onsubmit = e => { e.preventDefault(); ask(askInput.value.trim(), askInput) }
+el('wakeForm').onsubmit = e => { e.preventDefault(); ask(wake.input.value.trim(), wake.input) }
 let lastState = null
-function onState() { // a fresh "listening" state is the wake word: bring the input forward
+function onState(tsec) {
   const st = model.state
-  if (st && st !== lastState) { lastState = st; if (st.name === 'listening' && Date.now() / 1000 - st.ts < 20) { askInput.focus(); SOUND.prompt() } }
+  if (st && st !== lastState) {
+    lastState = st
+    const fresh = Date.now() / 1000 - st.ts < 20
+    if (st.name === 'listening' && fresh) { enterWake('listening'); wake.input.focus(); SOUND.prompt() }
+    else if (document.body.classList.contains('wake')) { setWake(st.name); if (st.name === 'idle') wakeIdleAt = Date.now() }
+  }
+  if (wakeIdleAt && Date.now() - wakeIdleAt > 20000 && document.activeElement !== wake.input) leaveWake() // quiet for 20 s: back to the graph
+}
+const BARS = '▁▂▃▄▅▆▇█'
+function meter(now) {
+  if (!document.body.classList.contains('wake')) return
+  const on = wake.root.dataset.state === 'listening' || wake.root.dataset.state === 'hearing'
+  let s = ''
+  for (let i = 0; i < 24; i++) { const v = on ? 0.5 + 0.5 * Math.sin(now / 90 + i * 0.7) * Math.sin(now / 530 + i) : 0; s += `<span>${BARS[Math.min(7, Math.floor(v * 7.99))]}</span>` }
+  wake.meter.innerHTML = s
 }
 
-// ---------- mouse: hover, drag, pin ----------
-const tip = el('tip'); let mouse = null, drag = null
-const hit = (S, drawn) => { if (!mouse) return null; let best = null; for (const n of drawn) { const p = pos.get(n.id); if (p && Math.hypot(p.x - mouse.x, p.y - mouse.y) < radiusOf(n) + 4) best = n } return best }
-let hovered = null
+// ---------- mouse: hover, drag, pin; keys ----------
+const tip = el('tip'); let mouse = null, drag = null, hovered = null
+const hit = (drawn) => { if (!mouse) return null; let best = null; for (const n of drawn) { const p = pos.get(n.id); if (p && Math.hypot(p.x - mouse.x, p.y - mouse.y) < radiusOf(n) + 4) best = n } return best }
 canvas.addEventListener('pointermove', e => { mouse = { x: e.offsetX, y: e.offsetY, px: e.clientX, py: e.clientY }; if (drag) { const p = pos.get(drag); if (p) { p.x = e.offsetX; p.y = e.offsetY; p.vx = p.vy = 0; settleUntil = performance.now() + 3000 } } })
 canvas.addEventListener('pointerdown', e => { if (hovered && hovered.id !== MAIN) { drag = hovered.id; pinned.add(drag); canvas.classList.add('grabbing'); canvas.setPointerCapture(e.pointerId) } })
 canvas.addEventListener('pointerup', () => { drag = null; canvas.classList.remove('grabbing') })
 canvas.addEventListener('dblclick', () => { if (hovered) { pinned.delete(hovered.id); settleUntil = performance.now() + 3000 } })
 canvas.addEventListener('pointerleave', () => { mouse = null; tip.style.display = 'none' })
-function hover(S, drawn, tsec) {
-  hovered = hit(S, drawn); canvas.classList.toggle('grab', !!hovered && hovered.id !== MAIN && !drag)
+function hover(drawn, tsec) {
+  hovered = hit(drawn); canvas.classList.toggle('grab', !!hovered && hovered.id !== MAIN && !drag)
   if (!hovered || drag) { tip.style.display = 'none'; return }
   const h = hovered
-  tip.innerHTML = h.kind === 'fold' ? `<b>${h.count} ${esc(h.status)} agents</b><br>${h.members.map(m => esc(m.kind) + ' ' + esc(tagOf(m))).join(', ')}` :
-    `<b>${esc(h.kind)}</b> ${esc(tagOf(h))} · ${esc(h.status)} · ${elapsed(h, tsec)}${pinned.has(h.id) ? ' · pinned' : ''}<br>` + (h.task ? esc(h.task) + '<br>' : '') +
-    `${h.tools} tool calls` + (h.lastTool ? `, last ${esc(shortTool(h.lastTool))}` : '') + (h.tokens ? `<br>tokens ${tokensOf(h).toLocaleString()} (out ${h.tokens.output_tokens || 0})` : '')
+  tip.innerHTML = h.kind === 'fold' ? `<b>${h.count} ${esc(h.status)} agents</b>\n${h.members.map(m => esc(m.kind) + ' ' + esc(tagOf(m))).join(', ')}` :
+    `<b>${esc(h.kind)}</b> ${esc(tagOf(h))} ${esc(h.status)} ${elapsed(h, tsec)}${pinned.has(h.id) ? ' pinned' : ''}\n` + (h.task ? esc(h.task) + '\n' : '') +
+    `${h.tools} tool calls` + (h.lastTool ? `, last ${esc(shortTool(h.lastTool))}` : '') + (h.tokens ? `\ntokens ${tokensOf(h).toLocaleString()} (out ${h.tokens.output_tokens || 0})` : '')
   tip.style.display = 'block'; tip.style.left = mouse.px + 14 + 'px'; tip.style.top = mouse.py + 14 + 'px'
 }
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return }
-  if (e.key === '/') { e.preventDefault(); askInput.focus(); return }
+  if (e.key === 'Escape') { if (document.body.classList.contains('wake')) leaveWake(); else if (e.target.tagName === 'INPUT') e.target.blur(); return }
+  if (e.target.tagName === 'INPUT') return
+  if (e.key === '/') { e.preventDefault(); (document.body.classList.contains('wake') ? wake.input : askInput).focus(); return }
   if (e.key === 'c') { const S = liveSession(); if (S) { S.clear(); dirty = true } }
   if (e.key === 'f') { document.body.classList.toggle('big'); resize(); if (big() && document.fullscreenEnabled && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {}); else if (!big() && document.fullscreenElement) document.exitFullscreen().catch(() => {}) }
-  if (e.key === 'm') { muted = !muted; el('hint').textContent = muted ? 'muted' : '' }
+  if (e.key === 'm') { muted = !muted; el('stSound').textContent = muted ? 'muted' : audio ? 'on' : 'off' }
   if (e.key === 'l') goLive()
 })
 
@@ -447,15 +486,15 @@ function frame(now) {
   const S = session()
   if (S && synced) {
     const tsec = scrub ? scrub.ts : Date.now() / 1000
-    if (!scrub) watch(S, now, tsec)
+    if (!scrub) watch(S, now)
     const edges = links(S, tsec), f = fold(S, edges), drawn = f.nodes, allEdges = edges.filter(e => drawn.some(n => n.id === e.to) && drawn.some(n => n.id === e.from)).concat(f.extra)
-    place(S, drawn, now); step(drawn, now); draw(S, drawn, allEdges, targetRing(S), now, tsec); hover(S, drawn, tsec)
-    if (dirty || now - lastPanel > 1000) { panel(S, tsec); strip(S, tsec); bar(S); onState(); lastPanel = now; dirty = false }
-  }
+    place(S, drawn, now); step(drawn, now); draw(S, drawn, allEdges, targetRing(S), now, tsec); hover(drawn, tsec); meter(now)
+    if (dirty || now - lastPanel > 1000) { panel(S, tsec); strip(S, tsec); bar(); onState(tsec); lastPanel = now; dirty = false }
+  } else if (synced) { meter(now); onState(Date.now() / 1000) }
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)
-window.hud = { model, session, liveSession, goLive, get scrub() { return scrub } } // for debugging from the console
+window.hud = { model, session, liveSession, goLive, enterWake, leaveWake, get scrub() { return scrub } }
 </script>
 </body>
 </html>

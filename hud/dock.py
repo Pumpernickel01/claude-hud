@@ -6,7 +6,10 @@ in its own profile so it is a separate process this script can close again.
   python3 dock.py open        open (or refocus) it
   python3 dock.py close       close it
   python3 dock.py big         open it full-screen in label-free mode (for a second display)
+  python3 dock.py wake        the HUD full screen, in wake mode (what the listener runs on "Hey Claude")
   python3 dock.py listen      build (once) and run the "Hey Claude" wake-word listener, see listen.swift
+  python3 dock.py listen --install    run it always: a launchd agent that starts at login and stays up
+  python3 dock.py listen --uninstall
   python3 dock.py --print     show the computed window geometry and exit
 
 CLAUDE_HUD_DOCK picks the side: right (default), left, or "x,y,w,h" in pixels.
@@ -91,14 +94,19 @@ def place(x, y, w, h, tries=40):
     return False
 
 
-def open_window(big=False):
+def open_window(big=False, wake=False):
+    """big: full screen, label-free. wake: full screen with the page in wake mode; an open window is
+    resized to the screen instead (the page enters wake mode on its own from the listening state)."""
     ensure_server()
+    W, H = screen()  # a few seconds of system_profiler, once per open
     if pids():
         subprocess.run(["osascript", "-e", f'tell application "{BROWSER}" to activate'], capture_output=True)
+        if wake:
+            place(0, 0, W, H, tries=4)
         return
     os.makedirs(PROFILE, mode=0o700, exist_ok=True)
-    url = URL + ("?big=1" if big else "")
-    box = None if big else geometry(*screen())  # system_profiler takes a few seconds, once per open
+    url = URL + ("?big=1" if big else "?wake=1" if wake else "")
+    box = None if big else (0, 0, W, H) if wake else geometry(W, H)
     subprocess.Popen(["open", "-na", BROWSER, "--args", f"--user-data-dir={PROFILE}", f"--app={url}",
                       "--no-first-run", "--no-default-browser-check"] + (["--start-fullscreen"] if big else []),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -147,6 +155,48 @@ def build_listener():
     return LISTENER
 
 
+AGENT_LABEL = "dev.claude-hud.listen"
+AGENT_PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{AGENT_LABEL}.plist")
+
+
+def agent_plist(python, dock, log):
+    """A launchd agent: the listener from login on, restarted if it dies. Values are XML-escaped."""
+    from xml.sax.saxutils import escape as x
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{AGENT_LABEL}</string>
+<key>ProgramArguments</key><array><string>{x(python)}</string><string>{x(dock)}</string><string>listen</string></array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>ThrottleInterval</key><integer>10</integer>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+<key>StandardErrorPath</key><string>{x(log)}</string>
+<key>StandardOutPath</key><string>{x(log)}</string>
+</dict></plist>
+"""
+
+
+def install_agent():
+    build_listener()
+    log = os.path.expanduser("~/.cache/claude-hud/listen.log")
+    os.makedirs(os.path.dirname(AGENT_PLIST), exist_ok=True)
+    with open(AGENT_PLIST, "w", encoding="utf-8") as f:
+        f.write(agent_plist(sys.executable, os.path.abspath(__file__), log))
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{AGENT_LABEL}"], capture_output=True)
+    subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", AGENT_PLIST], check=True)
+    print(f"installed {AGENT_PLIST}: the listener now runs from login on; log in {log}\n"
+          "The first run asks for the microphone and speech recognition: allow both.")
+
+
+def uninstall_agent():
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT_LABEL}"], capture_output=True)
+    if os.path.isfile(AGENT_PLIST):
+        os.remove(AGENT_PLIST)
+    print("listener agent removed")
+
+
 def listen(extra):
     ensure_server()
     env = dict(os.environ, CLAUDE_HUD_DIR=HERE, CLAUDE_MODS_HUD_PORT=str(PORT))
@@ -159,8 +209,14 @@ def main():
         W, H = screen()
         print(*geometry(W, H))
         return
-    if cmd == "listen":
+    if cmd == "listen" and "--install" in sys.argv:
+        install_agent()
+    elif cmd == "listen" and "--uninstall" in sys.argv:
+        uninstall_agent()
+    elif cmd == "listen":
         listen([a for a in sys.argv[2:]])
+    elif cmd == "wake":
+        open_window(wake=True)
     elif cmd == "toggle":
         close_window() if pids() else open_window()
     elif cmd == "open":

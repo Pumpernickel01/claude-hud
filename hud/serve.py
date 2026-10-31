@@ -57,6 +57,7 @@ class Jarvis:
         self.started = False
         self.lock = threading.Lock()
         self.busy = False
+        self.current = "idle"  # the last state set, for GET /jarvis
         self.clients = set()  # one queue per open /events stream
 
     def listen(self):
@@ -74,8 +75,8 @@ class Jarvis:
             for q in self.clients:
                 q.put(msg)
 
-    @staticmethod
-    def state(name):
+    def state(self, name):
+        self.current = name
         emit("state", "running", {}, state=name)  # no session: the strip reads it, no session is switched
 
     def ask(self, text, speak):
@@ -176,6 +177,13 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/events":
             self.stream()
+        elif path == "/jarvis":  # for the listener: when the answer has been spoken, a follow-up may begin
+            body = json.dumps({"busy": JARVIS.busy, "state": JARVIS.current}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_error(404)
 
@@ -205,13 +213,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(409, "an ask is already running")
             return
         if self.path == "/state":
-            name = self.body().get("name")
-            if name in ("listening", "thinking", "speaking", "idle"):
-                JARVIS.state(name)
-                self.send_response(204)
-                self.end_headers()
-            else:
+            b = self.body()
+            name, text = b.get("name"), b.get("text")
+            if name not in ("listening", "thinking", "speaking", "idle"):
                 self.send_error(400)
+                return
+            if isinstance(text, str):  # words heard so far: shown live on the page, never logged
+                JARVIS.broadcast({"kind": "hearing", "text": text[:1000]})
+                if JARVIS.current == name:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
+            JARVIS.state(name)
+            self.send_response(204)
+            self.end_headers()
             return
         if self.path == "/focus" and TERMINAL:
             subprocess.Popen(["osascript", "-e", "on run argv", "-e", "tell application id (item 1 of argv) to activate",
