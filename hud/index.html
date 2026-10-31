@@ -39,6 +39,18 @@
   #tools .more { color:var(--blue); cursor:pointer; justify-content:center; }
   .ok { color:var(--green); } .bad { color:var(--red); } .run { color:var(--yellow); } .live { color:var(--blue); }
   .gone { color:var(--ov); }
+  #chat { border-top:1px solid var(--s0); display:flex; flex-direction:column; max-height:40%; min-height:0; }
+  #chat .log { overflow:auto; padding:6px 14px; min-height:0; }
+  #chat .m { margin:4px 0; padding:6px 9px; border-radius:8px; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+  #chat .ask { background:var(--s0); color:var(--text); margin-left:18px; }
+  #chat .answer { background:#24243a; color:var(--text); margin-right:18px; border-left:2px solid var(--lav); }
+  #chat .error { background:#2e1f26; color:var(--red); margin-right:18px; }
+  #chat .m small { display:block; color:var(--ov); font-size:10px; margin-top:3px; }
+  #chat form { display:flex; gap:6px; padding:8px 14px; }
+  #chat input { flex:1; min-width:0; background:var(--base); color:var(--text); border:1px solid var(--s1); border-radius:6px; padding:6px 8px; font:inherit; }
+  #chat input:focus { outline:none; border-color:var(--lav); box-shadow:0 0 8px #b4befe66; }
+  #chat button { background:var(--s0); color:var(--text); border:1px solid var(--s1); border-radius:6px; font:inherit; padding:0 10px; cursor:pointer; }
+  #chat button.on { color:var(--green); border-color:var(--green); }
   #foot { padding:8px 14px; border-top:1px solid var(--s0); color:var(--ov); font-size:11px; }
   #tip { position:fixed; pointer-events:none; background:var(--s0); color:var(--text); padding:6px 9px;
          border-radius:6px; font-size:12px; max-width:360px; display:none; box-shadow:0 4px 16px #0008; z-index:5; }
@@ -83,7 +95,11 @@
     <div id="agents"></div>
     <h1>Tool calls</h1>
     <div id="tools"></div>
-    <div id="foot">drag to move · double-click unpins · c clear finished · f big screen · m mute · l live</div>
+    <h1>Jarvis</h1>
+    <div id="chat"><div class="log"></div>
+      <form id="askForm"><input id="askInput" placeholder="Ask Jarvis… ( / to focus )" autocomplete="off" maxlength="4000"><button type="button" id="speakBtn" title="speak answers aloud">🔊</button><button type="submit">Ask</button></form>
+    </div>
+    <div id="foot">drag to move · double-click unpins · c clear finished · f big screen · m mute · l live · / ask</div>
   </aside>
 </div>
 <div id="tip"></div>
@@ -343,8 +359,8 @@ el('tools').addEventListener('click', e => { if (e.target.classList.contains('mo
 for (const h of document.querySelectorAll('aside h1')) h.onclick = () => h.classList.toggle('closed')
 function strip(S, tsec) {
   const main = S.nodes.get(MAIN)
-  const voice = S.state && tsec - S.state.ts < 15 ? S.state.name : null // listening / speaking from a voice front end
-  const state = voice || (scrub ? 'replay' : main.status === 'running' ? 'thinking' : main.status === 'idle' ? 'idle' : main.status)
+  const j = model.state && tsec - model.state.ts < 20 && model.state.name !== 'idle' ? model.state.name : null // Jarvis: listening / thinking / speaking
+  const state = scrub ? 'replay' : j || (main.status === 'running' ? 'thinking' : main.status === 'idle' ? 'idle' : main.status)
   el('strip').className = state; document.querySelector('#strip .state').textContent = state === 'idle' ? 'idle · waiting for you' : state
 }
 const track = el('track')
@@ -368,6 +384,36 @@ function bar(S) {
   el('liveBtn').classList.toggle('on', !scrub); document.querySelector('#bar .when').textContent = scrub ? clock(scrub.ts) : clock(L.last)
 }
 
+// ---------- Jarvis chat: the exchange arrives as `chat` events; a wake word focuses the input ----------
+const chatLog = document.querySelector('#chat .log'), askInput = el('askInput'), speakBtn = el('speakBtn')
+let speak = localStorage.getItem('hud.speak') !== '0'
+speakBtn.classList.toggle('on', speak)
+speakBtn.onclick = () => { speak = !speak; localStorage.setItem('hud.speak', speak ? '1' : '0'); speakBtn.classList.toggle('on', speak) }
+function addChat(kind, text, meta) {
+  const d = document.createElement('div'); d.className = `m ${kind}`
+  d.innerHTML = esc(text) + (meta ? `<small>${esc(meta)}</small>` : '')
+  chatLog.appendChild(d); chatLog.scrollTop = chatLog.scrollHeight
+  while (chatLog.children.length > 60) chatLog.firstChild.remove()
+}
+es.addEventListener('chat', e => {
+  let m; try { m = JSON.parse(e.data) } catch { return }
+  if (m.kind === 'ask') addChat('ask', m.text)
+  else addChat(m.kind, m.text, m.cost != null ? `$${Number(m.cost).toFixed(2)} · ${fmtMs(m.ms)}` : '')
+  if (m.kind === 'answer') SOUND.chime()
+})
+el('askForm').onsubmit = async e => {
+  e.preventDefault()
+  const text = askInput.value.trim(); if (!text) return
+  askInput.value = ''
+  const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, speak }) }).catch(() => null)
+  if (!r || !r.ok) addChat('error', r && r.status === 409 ? 'Jarvis is still answering the last one' : 'could not reach the server')
+}
+let lastState = null
+function onState() { // a fresh "listening" state is the wake word: bring the input forward
+  const st = model.state
+  if (st && st !== lastState) { lastState = st; if (st.name === 'listening' && Date.now() / 1000 - st.ts < 20) { askInput.focus(); SOUND.prompt() } }
+}
+
 // ---------- mouse: hover, drag, pin ----------
 const tip = el('tip'); let mouse = null, drag = null
 const hit = (S, drawn) => { if (!mouse) return null; let best = null; for (const n of drawn) { const p = pos.get(n.id); if (p && Math.hypot(p.x - mouse.x, p.y - mouse.y) < radiusOf(n) + 4) best = n } return best }
@@ -387,7 +433,8 @@ function hover(S, drawn, tsec) {
   tip.style.display = 'block'; tip.style.left = mouse.px + 14 + 'px'; tip.style.top = mouse.py + 14 + 'px'
 }
 addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return }
+  if (e.key === '/') { e.preventDefault(); askInput.focus(); return }
   if (e.key === 'c') { const S = liveSession(); if (S) { S.clear(); dirty = true } }
   if (e.key === 'f') { document.body.classList.toggle('big'); resize(); if (big() && document.fullscreenEnabled && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {}); else if (!big() && document.fullscreenElement) document.exitFullscreen().catch(() => {}) }
   if (e.key === 'm') { muted = !muted; el('hint').textContent = muted ? 'muted' : '' }
@@ -402,7 +449,7 @@ function frame(now) {
     if (!scrub) watch(S, now, tsec)
     const edges = links(S, tsec), f = fold(S, edges), drawn = f.nodes, allEdges = edges.filter(e => drawn.some(n => n.id === e.to) && drawn.some(n => n.id === e.from)).concat(f.extra)
     place(S, drawn, now); step(drawn, now); draw(S, drawn, allEdges, targetRing(S), now, tsec); hover(S, drawn, tsec)
-    if (dirty || now - lastPanel > 1000) { panel(S, tsec); strip(S, tsec); bar(S); lastPanel = now; dirty = false }
+    if (dirty || now - lastPanel > 1000) { panel(S, tsec); strip(S, tsec); bar(S); onState(); lastPanel = now; dirty = false }
   }
   requestAnimationFrame(frame)
 }

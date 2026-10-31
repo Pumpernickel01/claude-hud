@@ -29,6 +29,35 @@ once at http://127.0.0.1:7431/. If you already use
 this already (its `hud` folder); this plugin's hooks stay quiet when they see
 `mods@claude-mods` installed, so the log is never written twice.
 
+## "Hey Claude": wake word, orb, and talking to Jarvis
+
+`bin/hud listen` runs an always-on listener (`hud/listen.swift`, built once
+with the Swift compiler from the Command Line Tools) that uses Apple's
+on-device speech recognition. Nothing is sent anywhere and nothing is kept
+until it hears "Hey Claude". Then an orb pulses in the middle of the screen,
+the HUD docks beside the terminal, the status strip turns to *listening*, and
+whatever you say next (in the same breath, or within about eight seconds) goes
+to Jarvis: the server runs `claude -p` with it, shows the exchange in the
+HUD's Jarvis panel, and reads the answer aloud. Say only "Hey Claude" and the
+HUD opens with its input focused so you can type instead; `/` focuses it any
+time. One conversation continues for as long as the server runs.
+
+First run, by hand, from your terminal: `bin/hud listen`. macOS asks twice,
+for the microphone and for speech recognition; allow both. After that,
+`CLAUDE_HUD_LISTEN=1` in your shell starts the listener with each Claude Code
+session. `~/.cache/claude-hud/listen --orb` shows the animation on its own;
+`--text "hey claude what time is it" --dry-run` runs the wake handler without
+a microphone.
+
+What it costs and does: every ask is a headless Claude call that loads your
+whole plugin stack, about $0.35 per question at the default model on this
+setup, resumed or not. `CLAUDE_HUD_MODEL` picks a cheaper model. The call runs
+with default permissions in your home directory: it answers and reads, it
+cannot run commands or edit files, so "open Spotify" needs the planned
+mac-operator agent, not this. Its events land in the log like any session's,
+so the HUD follows Jarvis's work while it answers. English only; speech from
+a video in the room can trigger it; there is no speaker verification.
+
 ## Docked beside the terminal
 
 ```
@@ -84,7 +113,10 @@ paths, tool names, durations, an agent's description and the first 120
 characters of its prompt, where each tool call reached (a file path, a host
 or an MCP server name), the first 120 characters of each prompt you type, and
 each notification's type. Tool inputs (commands, file contents, search text),
-outputs, error texts and message bodies are never logged. The log is 0600 in
+outputs, error texts and message bodies are never logged. What you say
+after "Hey Claude" becomes a prompt to a headless Claude session and is
+logged like any typed prompt (first 120 characters); Jarvis's `state` records
+hold only the state name. The listener keeps no audio and sends none. The log is 0600 in
 a 0700 directory and rotates at 20 MB. The server listens on localhost only.
 `POST /focus` activates the terminal app the hook started the server from
 and nothing else.
@@ -95,6 +127,7 @@ and nothing else.
 - A shell command that reaches several hosts shows the first.
 - Tokens are known when an agent stops, not while it runs.
 - Sound stays off until the first click or key (browser policy).
+- Jarvis answers come whole, not streamed; one ask at a time.
 - The docked column is placed on the main display; `hud big` or an explicit
   `x,y,w,h` for another one.
 

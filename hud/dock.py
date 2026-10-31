@@ -6,6 +6,7 @@ in its own profile so it is a separate process this script can close again.
   python3 dock.py open        open (or refocus) it
   python3 dock.py close       close it
   python3 dock.py big         open it full-screen in label-free mode (for a second display)
+  python3 dock.py listen      build (once) and run the "Hey Claude" wake-word listener, see listen.swift
   python3 dock.py --print     show the computed window geometry and exit
 
 CLAUDE_HUD_DOCK picks the side: right (default), left, or "x,y,w,h" in pixels.
@@ -118,13 +119,49 @@ def close_window():
             pass
 
 
+LISTENER = os.path.expanduser("~/.cache/claude-hud/listen")
+PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.claude-hud.listen</string>
+<key>CFBundleName</key><string>Claude HUD listener</string>
+<key>NSMicrophoneUsageDescription</key><string>Listens for "Hey Claude" on this Mac; audio never leaves it.</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>Recognizes "Hey Claude" and what you ask next, on this Mac only.</string>
+</dict></plist>
+"""
+
+
+def build_listener():
+    """Compiles listen.swift once (or when it changed) with an embedded Info.plist, which macOS requires
+    before a program may use the microphone or speech recognition."""
+    src = os.path.join(HERE, "listen.swift")
+    if os.path.isfile(LISTENER) and os.path.getmtime(LISTENER) >= os.path.getmtime(src):
+        return LISTENER
+    os.makedirs(os.path.dirname(LISTENER), mode=0o700, exist_ok=True)
+    plist = LISTENER + ".plist"
+    with open(plist, "w", encoding="utf-8") as f:
+        f.write(PLIST)
+    print("building the listener (once)…", flush=True)
+    subprocess.run(["swiftc", "-swift-version", "5", "-O", src, "-o", LISTENER,
+                    "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", plist], check=True)
+    return LISTENER
+
+
+def listen(extra):
+    ensure_server()
+    env = dict(os.environ, CLAUDE_HUD_DIR=HERE, CLAUDE_MODS_HUD_PORT=str(PORT))
+    os.execve(build_listener(), [LISTENER] + extra, env)
+
+
 def main():
     cmd = next((a for a in sys.argv[1:] if not a.startswith("--")), "toggle")
-    if "--print" in sys.argv:
+    if "--print" in sys.argv and cmd != "listen":
         W, H = screen()
         print(*geometry(W, H))
         return
-    if cmd == "toggle":
+    if cmd == "listen":
+        listen([a for a in sys.argv[2:]])
+    elif cmd == "toggle":
         close_window() if pids() else open_window()
     elif cmd == "open":
         open_window()

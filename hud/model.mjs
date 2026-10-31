@@ -96,9 +96,10 @@ export class Model {
     return best
   }
   ingest(rec) {
-    this.events.push(rec)
     const ev = rec.event
     const ts = parseTs(rec.ts)
+    if (ev === 'state') { this.state = { ts, name: rec.state || '' }; return } // listening | thinking | speaking | idle: Jarvis, not a session
+    this.events.push(rec)
     const sid = rec.session_id || 'unknown'
     if (!this.sessions.has(sid)) this.sessions.set(sid, new Session(sid, ts))
     const S = this.sessions.get(sid)
@@ -170,8 +171,6 @@ export class Model {
       S.counts.prompts++
       push(S.prompts, { ts, text: rec.text || '' }, 50)
       if (!S.ended) main.status = 'running'
-    } else if (ev === 'state') {
-      S.state = { ts, name: rec.state || '' } // listening | thinking | speaking, from a voice front end
     } else if (ev === 'notification') {
       S.counts.notes++
       push(S.notes, { ts, kind: rec.kind || 'notification' }, 50)

@@ -91,3 +91,11 @@ test('targets, prompts, notes, replay, fold', () => {
   const live = fold(S, links(S, S.nodes.get('aaaa0003').end + 1)) // one still flowing back: stays itself
   assert.equal(live.nodes.length, 4)
 })
+
+test('state records belong to no session', () => {
+  const m = new Model()
+  m.ingest(rec('session_start', { status: 'running' }))
+  m.ingest({ ts: '2026-10-30T10:00:05.000Z', event: 'state', status: 'running', session_id: null, state: 'listening' })
+  assert.equal(m.state.name, 'listening')
+  assert.equal(m.sessions.size, 1, 'no session created for it')
+})

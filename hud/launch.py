@@ -21,9 +21,22 @@ def listening():
         return False
 
 
+def listener_wanted():
+    """CLAUDE_HUD_LISTEN=1 starts the wake-word listener with the session, once it has been run by hand
+    and allowed to use the microphone and speech recognition."""
+    if os.environ.get("CLAUDE_HUD_LISTEN") != "1":
+        return
+    if subprocess.run(["pgrep", "-f", "/.cache/claude-hud/listen"], capture_output=True).returncode == 0:
+        return
+    dock = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dock.py")
+    subprocess.Popen([sys.executable, dock, "listen"], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def main():
     if "hud" in os.environ.get("CLAUDE_MODS_DISABLE", "").split(","):
         return
+    listener_wanted()
     if listening():
         return
     no_open = "--no-open" in sys.argv[1:]
