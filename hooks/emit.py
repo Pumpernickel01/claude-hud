@@ -16,6 +16,7 @@ Never blocks, never prints: any failure exits 0 quietly.
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from urllib.parse import urlsplit
@@ -56,7 +57,7 @@ def hostlike(t):
     labels = t.split(".")
     if len(labels) < 2 or any(not 0 < len(l) <= 63 for l in labels):
         return False
-    if all(l.isdigit() for l in labels):
+    if all(re.fullmatch(r"[0-9]{1,3}", l) for l in labels):
         return len(labels) == 4 and all(int(l) <= 255 for l in labels)
     return all(re.match(r"^[\w-]+$", l) for l in labels) and labels[-1].isalpha()
 
@@ -69,7 +70,10 @@ def bash_hosts(command):
         if h and h not in found:
             found.append(h)
     for segment in re.split(r"\s*(?:&&|\|\||[;|\n])\s*", command or ""):
-        tokens = [t.strip("'\"") for t in segment.strip().split()]
+        try:
+            tokens = shlex.split(segment)  # a quoted option value stays one token, so none of it looks like a host
+        except ValueError:
+            tokens = [t.strip("'\"") for t in segment.strip().split()]
         while tokens and (tokens[0] in PREFIX or re.match(r"^\w+=", tokens[0])):
             tokens.pop(0)
         program = (tokens[0] if tokens else "").split("/")[-1]
@@ -173,7 +177,10 @@ def main():
     elif kind in ("tool_end", "tool_fail"):
         tool = data.get("tool_name")
         to = (data.get("tool_input") or {}).get("to") if tool == "SendMessage" else None
-        target, target_kind = target_of(tool, data.get("tool_input"))
+        try:
+            target, target_kind = target_of(tool, data.get("tool_input"))
+        except Exception:
+            target = target_kind = None  # the record is worth more than its target
         emit("tool_end", "failed" if kind == "tool_fail" else "done", data, tool=tool,
              duration_ms=data.get("duration_ms"), tool_use_id=data.get("tool_use_id"), to=to,
              target=target, target_kind=target_kind)
