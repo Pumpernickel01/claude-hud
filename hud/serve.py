@@ -114,6 +114,10 @@ class Jarvis:
                 out = json.loads(stdout) if stdout.strip() else {}
                 answer = out.get("result") or (stderr.strip() or "no answer")[-800:]
                 error = bool(out.get("is_error")) or self.proc.returncode != 0
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.communicate()  # reaped: no orphan keeps running after the timeout
+                answer, error, out = "claude took longer than ten minutes and was stopped", True, {}
             except (OSError, ValueError, subprocess.SubprocessError) as e:
                 answer, error, out = f"claude failed: {e}", True, {}
             if self.cancelled:
