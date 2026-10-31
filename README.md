@@ -53,6 +53,14 @@ conversation flows. Say only "Hey Claude" and the wake screen opens with its
 input focused so you can type instead; esc closes it, `/` focuses it any time.
 One conversation continues for as long as the server runs.
 
+Pauses and cancelling: a pause of 3.5 seconds ends a sentence; the wake screen
+then shows *sending…* for 2.5 seconds, during which more words continue the
+sentence and "cancel", "wait", "stop" or "never mind" drops it. A question may
+run 30 seconds in all. While Jarvis thinks or speaks, saying "cancel" or
+"stop", or pressing esc on the wake screen, stops the running call and the
+voice. The timings live in `~/.config/claude-hud/listen.conf`, one per line:
+`pause=3.5`, `grace=2.5`, `max=30`, `followup=8`.
+
 `"~/Applications/Claude HUD Listener.app/Contents/MacOS/listen" --orb` shows the
 animation on its own;
 `--text "hey claude what time is it" --dry-run` runs the wake handler without

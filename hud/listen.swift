@@ -24,6 +24,19 @@ let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? 
 func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
 // "hey"/"hay" with the name or its usual mishearings; "hi" only with the name itself. Never a bare article:
 // "a cloud" is ordinary speech, and anything after a false wake would be sent and billed.
+// Timing, in seconds, with overrides in ~/.config/claude-hud/listen.conf (one `key=value` per line):
+//   pause  silence that ends a sentence (3.5)      max     longest question (30)
+//   grace  "sending in…" window you can still cancel or continue in (2.5)   followup  wake-free seconds after an answer (8)
+let conf: [String: Double] = {
+    var d: [String: Double] = ["pause": 3.5, "max": 30, "grace": 2.5, "followup": 8]
+    let path = NSHomeDirectory() + "/.config/claude-hud/listen.conf"
+    for line in ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n") {
+        let kv = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        if kv.count == 2, let v = Double(kv[1]), d[kv[0]] != nil { d[kv[0]] = v }
+    }
+    return d
+}()
+let cancelRegex = try! NSRegularExpression(pattern: "\\b(cancel|never ?mind|forget it|scratch that|stop|wait)\\b[,.!?]*\\s*$", options: .caseInsensitive)
 let wakeRegex = try! NSRegularExpression(pattern: "\\b(?:(?:hey|hay)[,.]?\\s+(?:claude|cloud|clawed|claud|clod|clyde)|hi[,.]?\\s+claude)\\b[,.!?]*", options: .caseInsensitive)
 
 // Lines go to stderr and to ~/.cache/claude-hud/listen.log (0600): launched as an app, stderr goes nowhere.
@@ -116,6 +129,9 @@ func showOrb(seconds: Double = 1.6, then: (() -> Void)? = nil) -> Orb {
 final class Jarvis {
     var capturing = false
     var followUp = false          // a capture that needs no wake word: right after an answer was spoken
+    var sending = false           // the grace window: silence was heard, the question goes out unless you speak
+    var sendAt = Date.distantPast
+    var awaiting = false          // an answer is being made or spoken: "cancel" stops it
     var wakeAt = Date.distantPast
     var lastChange = Date.distantPast
     var rest = ""
@@ -124,10 +140,15 @@ final class Jarvis {
     var orb: Orb?
     var onRestart: (() -> Void)?
 
+    func isCancel(_ t: String) -> Bool { cancelRegex.firstMatch(in: t, range: NSRange(location: 0, length: (t as NSString).length)) != nil }
+
     /// Every partial transcript of the current recognition request passes through here.
     func handle(transcript: String, final: Bool = false) {
         let ns = transcript as NSString
         if !capturing {
+            if awaiting, isCancel(transcript.trimmingCharacters(in: .whitespacesAndNewlines)) {  // "cancel" while it thinks or speaks
+                awaiting = false; log("cancel while answering"); post("/cancel", [:]); onRestart?(); return
+            }
             if Date() < followUntil {  // the conversation goes on: no wake word needed
                 let words = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !words.isEmpty else { return }
@@ -152,22 +173,45 @@ final class Jarvis {
         else if let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) {
             now = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if now != rest { rest = now; lastChange = Date(); post("/state", ["name": "listening", "text": rest]) }
+        if now != rest {
+            rest = now; lastChange = Date()
+            if sending { sending = false }  // more words: the sentence goes on
+            post("/state", ["name": "listening", "text": rest, "phase": "listening"])
+        }
         if final { finish() }
     }
 
-    /// Called a few times a second: ends the capture after 1.5 s without new words, or 8 s in all.
+    /// Called a few times a second. A pause (conf.pause) opens the grace window, shown on the page as
+    /// "sending in…"; more words close it again; when it runs out the question goes. conf.max caps it all.
     func tick() {
         guard capturing else { return }
         let now = Date()
-        if (!rest.isEmpty && now.timeIntervalSince(lastChange) > 1.5) || now.timeIntervalSince(wakeAt) > 8 { finish() }
+        if sending {
+            if now >= sendAt { finish() }
+            return
+        }
+        if now.timeIntervalSince(wakeAt) > conf["max"]! { finish(); return }
+        if !rest.isEmpty && now.timeIntervalSince(lastChange) > conf["pause"]! {
+            if isCancel(rest) { log("cancelled by voice"); discard(); return }
+            sending = true; sendAt = now.addingTimeInterval(conf["grace"]!)
+            post("/state", ["name": "listening", "text": rest, "phase": "sending"])
+        }
+        if rest.isEmpty && now.timeIntervalSince(wakeAt) > 12 { discard() }  // nothing said after the wake word
+    }
+
+    /// Drops the capture: nothing is sent.
+    func discard() {
+        capturing = false; sending = false; cooldownUntil = Date().addingTimeInterval(2); followUntil = .distantPast
+        orb?.close(); orb = nil; rest = ""
+        post("/state", ["name": "idle"]); onRestart?()
     }
 
     func finish() {
         guard capturing else { return }
-        capturing = false; cooldownUntil = Date().addingTimeInterval(3); followUntil = .distantPast
+        capturing = false; sending = false; cooldownUntil = Date().addingTimeInterval(3); followUntil = .distantPast
         orb?.close(); orb = nil
         if rest.isEmpty { post("/state", ["name": "idle"]); log("nothing heard: HUD open, type instead") }
+        else if isCancel(rest) { log("cancelled by voice"); post("/state", ["name": "idle"]) }
         else { log(dryRun ? "ask: \(rest)" : "ask (\(rest.count) chars)"); post("/ask", ["text": rest, "speak": true]); awaitAnswer() }
         rest = ""
         onRestart?()
@@ -176,10 +220,11 @@ final class Jarvis {
     /// After the answer has been spoken, eight seconds in which the next sentence needs no wake word.
     func awaitAnswer() {
         if dryRun { return }
+        awaiting = true
         var polls = 0
         func poll() {
             polls += 1
-            if polls > 240 { return }  // two minutes: give up quietly
+            if polls > 240 || !self.awaiting { self.awaiting = false; return }  // two minutes, or cancelled
             var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/jarvis")!)
             req.timeoutInterval = 3
             URLSession.shared.dataTask(with: req) { data, _, _ in
@@ -187,7 +232,8 @@ final class Jarvis {
                 let busy = j["busy"] as? Bool ?? true, state = j["state"] as? String ?? ""
                 DispatchQueue.main.async {
                     if !busy && state == "idle" {
-                        self.followUntil = Date().addingTimeInterval(8)
+                        self.awaiting = false
+                        self.followUntil = Date().addingTimeInterval(conf["followup"]!)
                         self.onRestart?()  // a fresh transcript: the Mac's own voice is not part of it
                         log("follow-up window open")
                     } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: poll) }

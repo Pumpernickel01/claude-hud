@@ -58,6 +58,7 @@ class Jarvis:
         self.lock = threading.Lock()
         self.busy = False
         self.current = "idle"  # the last state set, for GET /jarvis
+        self.proc = None  # the running claude or say, for /cancel
         self.clients = set()  # one queue per open /events stream
 
     def listen(self):
@@ -87,6 +88,17 @@ class Jarvis:
         threading.Thread(target=self.run, args=(text, speak), daemon=True).start()
         return True
 
+    def cancel(self):
+        """Stops the answer being made or spoken. True when there was one."""
+        with self.lock:
+            p, busy = self.proc, self.busy
+        if not busy:
+            return False
+        self.cancelled = True
+        if p and p.poll() is None:
+            p.terminate()
+        return True
+
     def run(self, text, speak):
         try:
             self.broadcast({"kind": "ask", "text": text})
@@ -95,18 +107,27 @@ class Jarvis:
             cmd += ["--resume", self.session] if self.started else ["--session-id", self.session]
             if MODEL:
                 cmd += ["--model", MODEL]
+            self.cancelled = False
             try:
-                r = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=600, cwd=os.path.expanduser("~"))
-                out = json.loads(r.stdout) if r.stdout.strip() else {}
-                answer = out.get("result") or (r.stderr.strip() or "no answer")[-800:]
-                error = bool(out.get("is_error")) or r.returncode != 0
+                self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.expanduser("~"))
+                stdout, stderr = self.proc.communicate(text, timeout=600)
+                out = json.loads(stdout) if stdout.strip() else {}
+                answer = out.get("result") or (stderr.strip() or "no answer")[-800:]
+                error = bool(out.get("is_error")) or self.proc.returncode != 0
             except (OSError, ValueError, subprocess.SubprocessError) as e:
                 answer, error, out = f"claude failed: {e}", True, {}
+            if self.cancelled:
+                answer, error = "cancelled", True
             self.started = self.started or not error
             self.broadcast({"kind": "error" if error else "answer", "text": answer, "cost": out.get("total_cost_usd"), "ms": out.get("duration_ms")})
             if speak and not error and sys.platform == "darwin":
                 self.state("speaking")
-                subprocess.run(["say"], input=answer[:SAY_CHARS], text=True, timeout=120)  # on stdin: an answer starting with - is not an option
+                self.proc = subprocess.Popen(["say"], stdin=subprocess.PIPE, text=True)
+                try:
+                    self.proc.communicate(answer[:SAY_CHARS], timeout=120)  # on stdin: an answer starting with - is not an option
+                except subprocess.SubprocessError:
+                    self.proc.kill()
+            self.proc = None
             self.state("idle")
         finally:
             with self.lock:
@@ -198,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.local():
             self.send_error(403)
             return
-        if self.path in ("/ask", "/state") and not secrets.compare_digest(self.headers.get("X-HUD-Token") or "", TOKEN):
+        if self.path in ("/ask", "/state", "/cancel") and not secrets.compare_digest(self.headers.get("X-HUD-Token") or "", TOKEN):
             self.send_error(403, "token")
             return
         if self.path == "/ask":
@@ -212,6 +233,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_error(409, "an ask is already running")
             return
+        if self.path == "/cancel":
+            self.send_response(204 if JARVIS.cancel() else 200)
+            self.end_headers()
+            return
         if self.path == "/state":
             b = self.body()
             name, text = b.get("name"), b.get("text")
@@ -219,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400)
                 return
             if isinstance(text, str):  # words heard so far: shown live on the page, never logged
-                JARVIS.broadcast({"kind": "hearing", "text": text[:1000]})
+                JARVIS.broadcast({"kind": "hearing", "text": text[:1000], "phase": b.get("phase") if b.get("phase") in ("listening", "sending") else "listening"})
                 if JARVIS.current == name:
                     self.send_response(204)
                     self.end_headers()

@@ -53,7 +53,11 @@ assert post("/state", {"name": "listening"}) == 204 and post("/state", {"name": 
 assert post("/state", {"name": "listening", "text": "what time"}) == 204  # words heard so far: a hearing event, not a log record
 j = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/jarvis", timeout=3).read()); assert j["state"] == "listening" and "busy" in j, j
 read_until(b'event: chat'); read_until(b'"kind": "ask"')
-read_until(b'"state":"listening"'); read_until(b'"kind": "hearing", "text": "what time"'); read_until(b'echo: ping')
+read_until(b'"state":"listening"'); read_until(b'"kind": "hearing", "text": "what time", "phase": "listening"'); read_until(b'echo: ping')
+assert post("/cancel", {}) == 200, "nothing to cancel: 200"
+assert post("/ask", {"text": "slow one"}) == 202
+time.sleep(0.15); assert post("/cancel", {}) == 204, "a running ask is cancelled: 204"
+read_until(b'"kind": "error", "text": "cancelled"')
 assert stream.count(b'"state":"listening"') == 1, "a live transcript must not log a second state record"
 print("server smoke test ok")
 PY
@@ -72,6 +76,8 @@ if command -v swiftc >/dev/null; then
   codesign --verify "$TMP/Listener.app" && echo "listener app bundle signed ok"
   OUT=$(CLAUDE_HUD_TOKEN_FILE="$TMP/token" CLAUDE_HUD_LOG="$TMP/listen.log" "$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
   echo "$OUT" | grep -q 'ask: what time is it' && echo "$OUT" | grep -q '/state' && echo "listener wake handler ok" || { echo "listener: $OUT"; exit 1; }
+  OUT=$(CLAUDE_HUD_TOKEN_FILE="$TMP/token" CLAUDE_HUD_LOG="$TMP/listen.log" "$BIN" --text "Hey Claude, open the thing, never mind" --dry-run 2>&1)
+  echo "$OUT" | grep -q 'cancelled by voice' && ! echo "$OUT" | grep -q '/ask' && echo "listener voice cancel ok" || { echo "listener cancel: $OUT"; exit 1; }
 fi
 # the launchd agent plist, without touching launchd
 python3 - <<'PY'

@@ -102,7 +102,7 @@
       <div class="meter"></div>
       <div class="heard"><span class="txt"></span><span class="cur"></span></div>
       <div class="reply"></div>
-      <div class="foot">speak, or type below and press return. esc closes.</div>
+      <div class="foot"></div>
       <form id="wakeForm" style="display:flex;gap:1ch;margin-top:8px"><span class="prompt" style="color:var(--amber)">&gt;</span><input id="wakeInput" autocomplete="off" maxlength="4000" style="flex:1;background:transparent;border:0;color:var(--fg);font:inherit;caret-color:var(--amber);outline:none"></form>
     </div></div>
   </div>
@@ -412,13 +412,19 @@ function enterWake(state) {
   document.body.classList.add('wake'); setWake(state); wakeIdleAt = 0
 }
 function leaveWake() { document.body.classList.remove('wake'); clearInterval(typer); wake.heard.textContent = ''; wake.reply.textContent = '' }
+const FOOT = { listening: 'pause to send. say cancel to drop it. type below and press return. esc closes.',
+               sending: 'sending in a moment. keep talking to continue, or say cancel. esc drops it.',
+               thinking: 'say cancel, or press esc, to stop.', speaking: 'say cancel, or press esc, to stop.',
+               idle: 'done. say more, type below, or esc.' }
 function setWake(state) {
-  wake.state.innerHTML = ({ listening: '<b>listening</b>', hearing: '<b>listening</b>', thinking: 'thinking', speaking: '<b>speaking</b>', idle: 'done. say more, or esc' })[state] || esc(state)
+  wake.state.innerHTML = ({ listening: '<b>listening</b>', sending: '<b>sending…</b>', thinking: 'thinking', speaking: '<b>speaking</b>', idle: 'done' })[state] || esc(state)
   wake.root.dataset.state = state
+  document.querySelector('#wake .foot').textContent = FOOT[state] || ''
 }
+const cancel = () => fetch('/cancel', { method: 'POST', headers: { 'X-HUD-Token': HUD_TOKEN } }).catch(() => {})
 es.addEventListener('chat', e => {
   let m; try { m = JSON.parse(e.data) } catch { return }
-  if (m.kind === 'hearing') { if (!document.body.classList.contains('wake')) enterWake('listening'); wake.heard.textContent = m.text; return }
+  if (m.kind === 'hearing') { if (!document.body.classList.contains('wake')) enterWake('listening'); wake.heard.textContent = m.text; setWake(m.phase === 'sending' ? 'sending' : 'listening'); return }
   if (m.kind === 'ask') { addChat('ask', m.text); if (document.body.classList.contains('wake')) { wake.heard.textContent = m.text; wake.reply.textContent = ''; setWake('thinking') } }
   else {
     addChat(m.kind, m.text, m.cost != null ? `$${Number(m.cost).toFixed(2)} ${fmtMs(m.ms)}` : '')
@@ -448,7 +454,7 @@ function onState(tsec) {
 const BARS = '▁▂▃▄▅▆▇█'
 function meter(now) {
   if (!document.body.classList.contains('wake')) return
-  const on = wake.root.dataset.state === 'listening' || wake.root.dataset.state === 'hearing'
+  const on = wake.root.dataset.state === 'listening' || wake.root.dataset.state === 'sending'
   let s = ''
   for (let i = 0; i < 24; i++) { const v = on ? 0.5 + 0.5 * Math.sin(now / 90 + i * 0.7) * Math.sin(now / 530 + i) : 0; s += `<span>${BARS[Math.min(7, Math.floor(v * 7.99))]}</span>` }
   wake.meter.innerHTML = s
@@ -472,7 +478,11 @@ function hover(drawn, tsec) {
   tip.style.display = 'block'; tip.style.left = mouse.px + 14 + 'px'; tip.style.top = mouse.py + 14 + 'px'
 }
 addEventListener('keydown', e => {
-  if (e.key === 'Escape') { if (document.body.classList.contains('wake')) leaveWake(); else if (e.target.tagName === 'INPUT') e.target.blur(); return }
+  if (e.key === 'Escape') {
+    if (document.body.classList.contains('wake')) { const st = wake.root.dataset.state; if (st === 'thinking' || st === 'speaking' || st === 'sending' || st === 'listening') cancel(); leaveWake() }
+    else if (e.target.tagName === 'INPUT') e.target.blur()
+    return
+  }
   if (e.target.tagName === 'INPUT') return
   if (e.key === '/') { e.preventDefault(); (document.body.classList.contains('wake') ? wake.input : askInput).focus(); return }
   if (e.key === 'c') { const S = liveSession(); if (S) { S.clear(); dirty = true } }
