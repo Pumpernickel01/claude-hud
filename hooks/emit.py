@@ -46,7 +46,7 @@ from events import emit  # noqa: E402
 FILE_TOOLS = {"Read": "file_path", "Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path",
               "Glob": "path", "Grep": "path"}
 # hosts a shell command reaches: the URL_HOST / SCP_HOST / NET rules of activity-pane/hooks/flows.ts
-URL_HOST = re.compile(r"\b(?:https?|wss?|ftp|mqtts?|coap|rtsp|tcp|udp)://(?:[^\s/@'\"]+@)?(\[[^\]]+\]|[^\s/:'\"?#]+)", re.I)
+URL_HOST = re.compile(r"\b(?:https?|wss?|ftp|mqtts?|coap|rtsp|tcp|udp)://(?:[^\s/@'\"]+@)?(\[[^\]]+\]|[^\s/:'\"?#{}$`]+)", re.I)  # no shell/template placeholders
 SCP_HOST = re.compile(r"\b[\w.-]+@([\w.-]+):")
 NET = {"ssh", "sftp", "mosh", "telnet", "nc", "ncat", "netcat", "socat", "ping", "ping6", "traceroute", "mtr",
        "nmap", "dig", "nslookup", "host", "ftp", "curl", "wget", "http", "https", "xh", "scp", "rsync"}
