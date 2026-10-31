@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude HUD</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --base:#1e1e2e; --mantle:#181825; --crust:#11111b; --s0:#313244; --s1:#45475a; --text:#cdd6f4;
+          --sub:#a6adc8; --ov:#6c7086; --blue:#89b4fa; --lav:#b4befe; --green:#a6e3a1; --yellow:#f9e2af;
+          --red:#f38ba8; --peach:#fab387; --teal:#94e2d5; --mauve:#cba6f7; }
+  html, body { margin:0; height:100%; background:var(--crust); color:var(--text);
+               font:13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; overflow:hidden; }
+  #wrap { display:grid; grid-template-columns: 1fr 320px; grid-template-rows: minmax(0, 1fr); height:100%; } /* the row never grows with the side panel's content */
+  body.big #wrap { grid-template-columns: 1fr 0; }
+  body.big aside { display:none; }
+  #stage { position:relative; min-width:0; }
+  canvas { display:block; width:100%; height:100%; background:
+           radial-gradient(ellipse at 50% 45%, #232337 0%, var(--base) 55%, var(--crust) 100%); }
+  canvas.grab { cursor:grab; } canvas.grabbing { cursor:grabbing; }
+  aside { background:var(--mantle); border-left:1px solid var(--s0); display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  aside h1 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--sub); margin:0;
+             padding:10px 14px 6px; cursor:pointer; user-select:none; }
+  aside h1::after { content:' ▾'; color:var(--ov); } aside h1.closed::after { content:' ▸'; }
+  aside h1.closed + div { display:none; }
+  #head { padding:4px 14px 10px; border-bottom:1px solid var(--s0); }
+  #head b { color:var(--lav); font-weight:600; }
+  #head .st { color:var(--ov); }
+  #head .pr { color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #agents { padding:6px 14px; border-bottom:1px solid var(--s0); max-height:34%; overflow:auto; }
+  #agents div { display:flex; gap:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #agents .dot { width:8px; flex:none; text-align:center; }
+  #agents .meta { color:var(--ov); margin-left:auto; }
+  #tools { flex:1; overflow:auto; padding:6px 14px; min-height:0; }
+  #tools div { display:flex; gap:8px; white-space:nowrap; }
+  #tools .t { color:var(--ov); }
+  #tools .who { color:var(--mauve); min-width:7ch; }
+  #tools .tool { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  #tools .ms { margin-left:auto; color:var(--ov); flex:none; }
+  #tools .more { color:var(--blue); cursor:pointer; justify-content:center; }
+  .ok { color:var(--green); } .bad { color:var(--red); } .run { color:var(--yellow); } .live { color:var(--blue); }
+  .gone { color:var(--ov); }
+  #foot { padding:8px 14px; border-top:1px solid var(--s0); color:var(--ov); font-size:11px; }
+  #tip { position:fixed; pointer-events:none; background:var(--s0); color:var(--text); padding:6px 9px;
+         border-radius:6px; font-size:12px; max-width:360px; display:none; box-shadow:0 4px 16px #0008; z-index:5; }
+  #tip b { color:var(--lav); }
+  #strip { position:absolute; top:12px; left:16px; display:flex; gap:10px; align-items:center; font-size:12px;
+           letter-spacing:.1em; text-transform:uppercase; color:var(--sub); pointer-events:none; }
+  #strip .led { width:9px; height:9px; border-radius:50%; background:var(--ov); box-shadow:0 0 8px transparent; transition: background .3s, box-shadow .3s; }
+  #strip.thinking .led { background:var(--blue); box-shadow:0 0 10px var(--blue); animation: breathe 1.2s ease-in-out infinite; }
+  #strip.listening .led { background:var(--green); box-shadow:0 0 10px var(--green); animation: breathe .6s ease-in-out infinite; }
+  #strip.speaking .led { background:var(--mauve); box-shadow:0 0 10px var(--mauve); animation: breathe .4s ease-in-out infinite; }
+  #strip.idle .led { background:var(--teal); }
+  #strip .hint { color:var(--ov); text-transform:none; letter-spacing:0; }
+  @keyframes breathe { 50% { opacity:.4 } }
+  #toasts { position:absolute; top:12px; right:16px; display:flex; flex-direction:column; gap:8px; width:280px; }
+  .toast { background:var(--s0); border-left:3px solid var(--yellow); padding:8px 10px; border-radius:6px; font-size:12px;
+           cursor:pointer; box-shadow:0 6px 20px #000a; animation: slidein .25s ease-out; }
+  .toast.ok { border-color:var(--green); } .toast.ask { border-color:var(--red); }
+  .toast small { display:block; color:var(--ov); }
+  @keyframes slidein { from { opacity:0; transform:translateY(-6px) } to { opacity:1 } }
+  #bar { position:absolute; left:16px; right:16px; bottom:14px; height:26px; display:flex; align-items:center; gap:10px; }
+  #track { flex:1; height:6px; background:var(--s1); border-radius:3px; position:relative; cursor:pointer; }
+  #track .fill { position:absolute; left:0; top:0; bottom:0; background:var(--blue); opacity:.6; border-radius:3px; }
+  #track .knob { position:absolute; top:-5px; width:16px; height:16px; margin-left:-8px; border-radius:50%; background:var(--lav); box-shadow:0 0 8px var(--lav); }
+  #bar button { background:var(--s0); color:var(--text); border:1px solid var(--s1); border-radius:4px; font:inherit; font-size:11px; padding:2px 8px; cursor:pointer; }
+  #bar button.on { color:var(--green); border-color:var(--green); }
+  #bar .when { color:var(--ov); font-size:11px; min-width:9ch; text-align:right; }
+  body.big #strip { font-size:16px; } body.big #bar { display:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="strip"><span class="led"></span><span class="state">waiting</span><span class="hint" id="hint">click anywhere to enable sound</span></div>
+    <div id="toasts"></div>
+    <div id="bar"><button id="liveBtn" class="on">LIVE</button><div id="track"><div class="fill"></div><div class="knob"></div></div><span class="when"></span></div>
+  </div>
+  <aside>
+    <h1>Session</h1>
+    <div id="head"><b>waiting for events…</b><div class="st"></div></div>
+    <h1>Agents</h1>
+    <div id="agents"></div>
+    <h1>Tool calls</h1>
+    <div id="tools"></div>
+    <div id="foot">drag to move · double-click unpins · c clear finished · f big screen · m mute · l live</div>
+  </aside>
+</div>
+<div id="tip"></div>
+<script type="module">
+import { Model, MAIN, links, fold } from './model.mjs'
+
+const C = { base:'#1e1e2e', s0:'#313244', s1:'#45475a', text:'#cdd6f4', sub:'#a6adc8', ov:'#6c7086',
+            blue:'#89b4fa', lav:'#b4befe', green:'#a6e3a1', yellow:'#f9e2af', red:'#f38ba8',
+            peach:'#fab387', teal:'#94e2d5', mauve:'#cba6f7' }
+const STATUS_COLOR = { running:C.blue, starting:C.yellow, done:C.green, failed:C.red, gone:C.ov, idle:C.teal }
+const TARGET_COLOR = { file:C.peach, host:C.teal, mcp:C.mauve }
+const NOTE_LABEL = { permission_prompt:'Needs permission', idle_prompt:'Waiting for you', agent_needs_input:'Agent needs input', agent_completed:'Agent finished' }
+const HEX_ID = /^[0-9a-f]{8,}$/
+const TARGETS_SHOWN = 24
+const el = id => document.getElementById(id)
+
+// ---------- data ----------
+const model = new Model()
+const params = new URLSearchParams(location.search), wanted = params.get('session')
+if (params.get('big')) document.body.classList.add('big') // ?big=1: label-free big-screen mode from the start
+const liveSession = () => (wanted ? model.sessions.get(wanted) : model.latest()) || null
+let synced = false, dirty = true
+let scrub = null // {ts, S} when the history scrubber is engaged
+const session = () => scrub ? scrub.S : liveSession()
+const es = new EventSource('/events' + (wanted ? `?session=${encodeURIComponent(wanted)}` : ''))
+es.onmessage = e => { try { model.ingest(JSON.parse(e.data)) } catch {} ; if (synced) dirty = true }
+es.addEventListener('synced', () => { synced = true; dirty = true })
+es.onerror = () => { document.querySelector('#head .st').textContent = 'reconnecting…' }
+
+// ---------- sound: unlocked by the first click or key, m mutes ----------
+let audio = null, muted = false
+const unlock = () => { if (!audio) { audio = new (window.AudioContext || window.webkitAudioContext)(); el('hint').textContent = '' } if (audio.state === 'suspended') audio.resume() }
+addEventListener('pointerdown', unlock, { once: true }); addEventListener('keydown', unlock, { once: true })
+function tone(freq, ms, gain = 0.05, type = 'sine', slide = 0) {
+  if (!audio || muted || scrub) return
+  const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime
+  o.type = type; o.frequency.setValueAtTime(freq, t); if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + ms / 1000)
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0005, t + ms / 1000)
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + ms / 1000 + 0.02)
+}
+const SOUND = { tick: () => tone(1500, 40, 0.025), chime: () => { tone(880, 160, 0.05); setTimeout(() => tone(1320, 260, 0.05), 110) },
+                fail: () => tone(220, 300, 0.06, 'sawtooth', 110), prompt: () => tone(660, 90, 0.03), note: () => { tone(988, 120, 0.05); setTimeout(() => tone(740, 200, 0.05), 140) } }
+
+// ---------- layout ----------
+const canvas = el('c'), ctx = canvas.getContext('2d')
+const pos = new Map() // node id -> {x, y, vx, vy, born}
+const pinned = new Set()
+let W = 0, H = 0, settleUntil = 0
+function resize() {
+  const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1
+  W = r.width; H = r.height
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); settleUntil = performance.now() + 3000
+}
+addEventListener('resize', resize); resize()
+const hash = s => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h >>> 0 }
+const big = () => document.body.classList.contains('big')
+const scale = () => big() ? 1.6 : 1
+
+function place(S, drawn, now) {
+  for (const [a, b] of S.rekeyed.splice(0)) if (pos.has(a) && !pos.has(b)) { pos.set(b, pos.get(a)); pos.delete(a) } // a spawn keeps its spot when it gets its agent id
+  let changed = false
+  for (const n of drawn) {
+    if (pos.has(n.id)) continue
+    const p = pos.get(n.parent) || { x: W / 2, y: H / 2 }
+    const a = (hash(n.id) % 628) / 100 // stable pseudo-random angle: no two nodes start on the same spot
+    pos.set(n.id, { x: p.x + Math.cos(a) * 40 + (Math.random() - .5), y: p.y + Math.sin(a) * 40 + (Math.random() - .5), vx: 0, vy: 0, born: now })
+    changed = true
+  }
+  const keep = new Set(drawn.map(n => n.id))
+  for (const nid of pos.keys()) if (!keep.has(nid)) { pos.delete(nid); changed = true }
+  if (changed) settleUntil = now + 4000
+}
+function step(drawn, now) {
+  const main = pos.get(MAIN); main.x = W / 2; main.y = H / 2
+  if (now > settleUntil) return // settled: hold still until something changes
+  const k = scale()
+  for (let i = 0; i < drawn.length; i++) {
+    const a = pos.get(drawn[i].id)
+    for (let j = i + 1; j < drawn.length; j++) {
+      const b = pos.get(drawn[j].id)
+      let dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy
+      if (d2 < 1) { dx = 1; dy = 0; d2 = 1 }
+      const f = 9000 * k * k / d2, d = Math.sqrt(d2)
+      a.vx -= f * dx / d; a.vy -= f * dy / d; b.vx += f * dx / d; b.vy += f * dy / d
+    }
+  }
+  for (const n of drawn) {
+    if (n.id === MAIN) continue
+    const p = pos.get(n.id)
+    if (pinned.has(n.id)) { p.vx = p.vy = 0; continue }
+    const q = pos.get(n.parent) || main
+    const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1
+    const want = (n.parent === MAIN ? 170 : 110) * k
+    const f = (d - want) * 0.02
+    p.vx += f * dx / d; p.vy += f * dy / d
+    p.vx += (W / 2 - p.x) * 0.0015; p.vy += (H / 2 - p.y) * 0.0015 // weak gravity keeps strays on screen
+    p.vx *= 0.82; p.vy *= 0.82
+    if (Math.abs(p.vx) < 0.03) p.vx = 0; if (Math.abs(p.vy) < 0.03) p.vy = 0 // dead zone: no slow drift
+    p.x = Math.min(W - 40, Math.max(40, p.x + p.vx)); p.y = Math.min(H - 40, Math.max(40, p.y + p.vy))
+  }
+}
+// destinations sit on a ring around the graph, newest-touched TARGETS_SHOWN of them, in order of first use
+function targetRing(S) {
+  const all = [...S.targets.values()].sort((a, b) => b.last - a.last).slice(0, TARGETS_SHOWN).sort((a, b) => a.id < b.id ? -1 : 1)
+  const rx = W / 2 - 180 * scale(), ry = H / 2 - 70 * scale(), out = new Map() // an ellipse: room for labels at the sides, the bar below
+  all.forEach((t, i) => { const a = -Math.PI / 2 + (i / all.length) * Math.PI * 2; out.set(t.id, { t, x: W / 2 + Math.cos(a) * rx, y: H / 2 + Math.sin(a) * ry }) })
+  return out
+}
+
+// ---------- effects driven by changes in the session ----------
+const fx = { flashes: new Map(), pulses: [], hits: [], bubbles: [], swellAt: -1e9, seen: null, status: new Map(), sid: null }
+function watch(S, now, tsec) {
+  if (fx.sid !== S.id) { Object.assign(fx, { flashes: new Map(), pulses: [], hits: [], bubbles: [], seen: { ...S.counts }, status: new Map(), sid: S.id }); return }
+  const fresh = (arr, key) => { const n = Math.min(arr.length, S.counts[key] - fx.seen[key]); fx.seen[key] = S.counts[key]; return n > 0 ? arr.slice(-n) : [] }
+  for (const c of fresh(S.calls, 'calls')) { fx.flashes.set(c.agent.id, { tool: c.tool, at: now }); if (now - lastTick > 60) { SOUND.tick(); lastTick = now } }
+  for (const h of fresh(S.hits, 'hits')) fx.hits.push({ ...h, at: now })
+  for (const p of fresh(S.prompts, 'prompts')) { fx.bubbles.push({ text: p.text, at: now }); SOUND.prompt() }
+  for (const n of fresh(S.notes, 'notes')) { toast(NOTE_LABEL[n.kind] || n.kind, n.kind === 'permission_prompt' || n.kind === 'agent_needs_input' ? 'ask' : '', now); SOUND.note() }
+  for (const [nid, n] of S.nodes) {
+    const was = fx.status.get(nid)
+    if (was && was !== n.status) {
+      if (nid === MAIN && n.status === 'idle' && was === 'running') { toast('Claude finished', 'ok', now); SOUND.chime() }
+      if (nid !== MAIN && (n.status === 'done' || n.status === 'failed')) {
+        fx.pulses.push({ from: nid, to: n.parent, at: now, color: n.status === 'done' ? C.green : C.red }); fx.swellAt = now + 500
+        n.status === 'done' ? SOUND.chime() : SOUND.fail()
+      }
+    }
+    fx.status.set(nid, n.status)
+  }
+  if (fx.hits.length > 60) fx.hits.splice(0, fx.hits.length - 60)
+  fx.pulses = fx.pulses.filter(p => now - p.at < 900); fx.bubbles = fx.bubbles.filter(b => now - b.at < 7000)
+}
+let lastTick = 0
+function toast(text, cls, now) {
+  const d = document.createElement('div'); d.className = `toast ${cls}`; d.innerHTML = `${esc(text)}<small>${new Date().toTimeString().slice(0, 8)} · click to focus the terminal</small>`
+  d.onclick = () => { fetch('/focus', { method: 'POST' }).catch(() => {}); d.remove() }
+  el('toasts').prepend(d); setTimeout(() => d.remove(), 8000)
+  while (el('toasts').children.length > 4) el('toasts').lastChild.remove()
+}
+
+// ---------- drawing ----------
+const tagOf = n => n.kind === 'fold' ? n.alias : HEX_ID.test(n.id) ? n.id.slice(0, 6) : n.id === MAIN ? 'main' : n.id.slice(-6)
+const tokensOf = n => n.tokens ? (n.tokens.input_tokens || 0) + (n.tokens.cache_read_input_tokens || 0) + (n.tokens.cache_creation_input_tokens || 0) + (n.tokens.output_tokens || 0) : 0
+const radiusOf = n => (n.id === MAIN ? 26 : n.kind === 'fold' ? 17 : 19 + Math.min(12, Math.log10(1 + tokensOf(n) / 1000) * 6)) * scale() // heavier with tokens
+const shortTool = t => t.replace(/^mcp__(plugin_)?/, '').replace(/^([^_]+)_\1__/, '$1:').replace(/__/, ':')
+const shortTarget = t => { const s = t.kind === 'file' ? t.id.split('/').slice(-2).join('/') : t.id; return s.length > 26 ? '…' + s.slice(-25) : s }
+const bezier = (a, b, bend) => { const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1; return { cx: mx - dy / d * bend, cy: my + dx / d * bend } }
+const onCurve = (a, c, b, t) => ({ x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * c.cx + t * t * b.x, y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * c.cy + t * t * b.y })
+const font = px => `${px * scale()}px ui-monospace, Menlo, monospace`
+
+function draw(S, drawn, edges, ring, now, tsec) {
+  ctx.clearRect(0, 0, W, H)
+  const k = scale()
+  // destination ring, behind everything
+  for (const { t, x, y } of ring.values()) {
+    const idle = Math.min(1, (tsec - t.last) / 60), col = TARGET_COLOR[t.kind] || C.sub
+    const hot = Math.max(0, 1 - (tsec - t.last) / 1.5)
+    ctx.globalAlpha = 0.25 + 0.6 * (1 - idle)
+    if (hot > 0) { ctx.shadowColor = col; ctx.shadowBlur = 20 * hot }
+    ctx.beginPath(); ctx.fillStyle = C.base; ctx.strokeStyle = col; ctx.lineWidth = 1.5
+    if (t.kind === 'file') ctx.rect(x - 6 * k, y - 7 * k, 12 * k, 14 * k); else if (t.kind === 'host') ctx.arc(x, y, 7 * k, 0, 7); else { ctx.moveTo(x, y - 8 * k); ctx.lineTo(x + 8 * k, y); ctx.lineTo(x, y + 8 * k); ctx.lineTo(x - 8 * k, y); ctx.closePath() }
+    ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0
+    if (!big()) { ctx.fillStyle = col; ctx.font = font(10); ctx.textAlign = x < W / 2 ? 'right' : 'left'; ctx.fillText(shortTarget(t), x + (x < W / 2 ? -12 : 12), y + 4) }
+  }
+  ctx.globalAlpha = 1
+  // dots flying from an agent to the file, host or server it just touched
+  for (const h of fx.hits) {
+    const a = pos.get(h.from) || pos.get(MAIN), b = ring.get(h.target); if (!a || !b) continue
+    const t = (now - h.at) / 700; if (t > 1) continue
+    const c = bezier(a, b, 30), p = onCurve(a, c, b, t)
+    ctx.globalAlpha = 1 - t * 0.6; ctx.fillStyle = TARGET_COLOR[b.t.kind] || C.sub
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3 * k, 0, 7); ctx.fill()
+    ctx.strokeStyle = ctx.fillStyle; ctx.globalAlpha = 0.25 * (1 - t); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(c.cx, c.cy, b.x, b.y); ctx.stroke()
+  }
+  fx.hits = fx.hits.filter(h => now - h.at < 700)
+  // edges
+  for (const l of edges) {
+    const a = pos.get(l.from), b = pos.get(l.to); if (!a || !b) continue
+    const bend = ((hash(l.from + l.to) % 40) - 20) * (l.kind === 'message' ? 2 : 1)
+    const c = bezier(a, b, bend), live = l.flowing
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(c.cx, c.cy, b.x, b.y)
+    ctx.setLineDash(l.kind === 'message' ? [6, 6] : []); ctx.lineWidth = live ? 1.8 : 1
+    ctx.strokeStyle = live ? (l.kind === 'message' ? C.mauve : C.blue) : C.s1; ctx.globalAlpha = live ? 0.9 : 0.5
+    ctx.stroke(); ctx.setLineDash([])
+    if (live && !scrub) {
+      ctx.fillStyle = l.kind === 'message' ? C.mauve : C.lav
+      for (let i = 0; i < 3; i++) {
+        let t = ((now / 1400) + i / 3 + (hash(l.to) % 100) / 100) % 1; if (l.back) t = 1 - t
+        const p = onCurve(a, c, b, t); ctx.globalAlpha = 0.35 + 0.65 * Math.sin(t * Math.PI)
+        ctx.beginPath(); ctx.arc(p.x, p.y, 2.6 * k, 0, 7); ctx.fill()
+      }
+    }
+  }
+  // return pulses: one bright dot racing back to the parent when an agent finishes
+  for (const p of fx.pulses) {
+    const a = pos.get(p.from), b = pos.get(p.to); if (!a || !b) continue
+    const t = Math.min(1, (now - p.at) / 600), c = bezier(a, b, ((hash(p.to + p.from) % 40) - 20)), q = onCurve(a, c, b, t)
+    ctx.globalAlpha = 1; ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 16
+    ctx.beginPath(); ctx.arc(q.x, q.y, 5 * k, 0, 7); ctx.fill(); ctx.shadowBlur = 0
+  }
+  ctx.globalAlpha = 1
+  // nodes
+  for (const n of drawn) {
+    const p = pos.get(n.id), isMain = n.id === MAIN
+    let r = radiusOf(n)
+    if (isMain && now < fx.swellAt) r *= 1 + 0.25 * Math.sin((fx.swellAt - now) / 500 * Math.PI)
+    const col = STATUS_COLOR[n.status] || C.sub
+    const grow = Math.max(0, Math.min(1, (now - p.born) / 400))
+    ctx.globalAlpha = (n.isLive || isMain ? 1 : 0.45) * grow
+    if ((n.isLive || (isMain && n.status === 'running')) && !scrub) { const pulse = 0.5 + 0.5 * Math.sin(now / 350 + hash(n.id)); ctx.shadowColor = col; ctx.shadowBlur = 18 + 14 * pulse }
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * grow, 0, 7); ctx.fillStyle = C.base; ctx.fill()
+    ctx.lineWidth = isMain ? 3 : 2; ctx.strokeStyle = col; if (n.kind === 'fold') ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]); ctx.shadowBlur = 0
+    if (pinned.has(n.id)) { ctx.fillStyle = C.yellow; ctx.beginPath(); ctx.arc(p.x + r * 0.7, p.y - r * 0.7, 2.5 * k, 0, 7); ctx.fill() }
+    if (n.isLive && !isMain && !scrub) { ctx.beginPath(); ctx.arc(p.x, p.y, r + 5 * k, now / 300, now / 300 + 1.6); ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke() }
+    ctx.fillStyle = col; ctx.font = font(isMain ? 12 : 9); ctx.textAlign = 'center'
+    ctx.fillText(isMain ? (n.task || 'main') : tagOf(n), p.x, p.y + 4 * k)
+    if (!big() || n.kind !== 'fold') { ctx.fillStyle = C.sub; ctx.font = font(11); ctx.fillText(isMain ? n.status : n.kind === 'fold' ? '' : n.kind, p.x, p.y + r + 15 * k) }
+    const fl = fx.flashes.get(n.id) // the tool an agent just used, shown for a second
+    if (fl && now - fl.at < 1100) { ctx.globalAlpha = Math.min(1, (1100 - (now - fl.at)) / 400); ctx.fillStyle = C.yellow; ctx.font = font(10); ctx.fillText(shortTool(fl.tool), p.x, p.y - r - 8 * k) }
+  }
+  // prompt bubbles at main
+  const m = pos.get(MAIN)
+  fx.bubbles.forEach((b, i) => {
+    const age = now - b.at, a = age < 300 ? age / 300 : age > 6000 ? Math.max(0, 1 - (age - 6000) / 1000) : 1
+    const text = b.text.length > 56 ? b.text.slice(0, 55) + '…' : b.text
+    ctx.font = font(12); const w = ctx.measureText(text).width + 20 * k, h = 24 * k, x = m.x - w / 2, y = m.y - 60 * k - i * 30 * k
+    ctx.globalAlpha = a * 0.95; ctx.fillStyle = C.s0; ctx.beginPath(); ctx.roundRect(x, y - h / 2, w, h, 8 * k); ctx.fill()
+    ctx.fillStyle = C.text; ctx.textAlign = 'center'; ctx.fillText(text, m.x, y + 4 * k)
+  })
+  ctx.globalAlpha = 1
+}
+
+// ---------- side panel, strip, scrubber ----------
+const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))
+const fmtMs = ms => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
+const elapsed = (n, tsec) => { const s = Math.max(0, Math.round((n.end ?? tsec) - n.start)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}` }
+const cls = st => ({ running: 'live', starting: 'run', done: 'ok', failed: 'bad', gone: 'gone', idle: 'ok' }[st] || '')
+const clock = ts => new Date(ts * 1000).toTimeString().slice(0, 8)
+let lastPanel = 0, moreTools = false
+function panel(S, tsec) {
+  const main = S.nodes.get(MAIN), live = [...S.nodes.values()].filter(n => n.id !== MAIN && n.isLive).length
+  const last = S.prompts.at(-1)
+  el('head').innerHTML = `<b>${esc(main.task || S.id.slice(0, 8))}</b> <span class="${cls(main.status)}">${main.status}</span>` +
+    `<div class="st">${S.nodes.size - 1} agents · ${live} live · ${S.targets.size} destinations</div>` + (last ? `<div class="pr" title="${esc(last.text)}">› ${esc(last.text)}</div>` : '')
+  const rows = [...S.nodes.values()].filter(n => n.id !== MAIN).sort((a, b) => b.start - a.start).map(n =>
+    `<div><span class="dot ${cls(n.status)}">${n.isLive ? '●' : n.status === 'failed' ? '✗' : n.status === 'gone' ? '○' : '✓'}</span>` +
+    `<span>${esc(n.kind)}</span><span class="${cls(n.status)}">${esc(tagOf(n))}</span><span class="meta">${n.tools} calls · ${elapsed(n, tsec)}</span></div>`)
+  el('agents').innerHTML = rows.join('') || '<div class="gone">no agents yet</div>'
+  const shown = S.calls.slice(moreTools ? -200 : -15).reverse()
+  el('tools').innerHTML = shown.map(c =>
+    `<div><span class="t">${clock(c.ts)}</span><span class="who">${esc(c.agent.id === MAIN ? 'main' : tagOf(c.agent))}</span>` +
+    `<span class="tool ${c.status === 'failed' ? 'bad' : 'ok'}" title="${esc(c.target || '')}">${esc(shortTool(c.tool))}${c.target ? ` <span class="gone">→ ${esc(c.targetKind === 'file' ? c.target.split('/').pop() : c.target)}</span>` : ''}</span><span class="ms">${fmtMs(c.ms)}</span></div>`).join('') +
+    (S.calls.length > 15 ? `<div class="more">${moreTools ? 'show fewer' : `show all ${S.calls.length}`}</div>` : '')
+}
+el('tools').addEventListener('click', e => { if (e.target.classList.contains('more')) { moreTools = !moreTools; dirty = true } })
+for (const h of document.querySelectorAll('aside h1')) h.onclick = () => h.classList.toggle('closed')
+function strip(S, tsec) {
+  const main = S.nodes.get(MAIN)
+  const voice = S.state && tsec - S.state.ts < 15 ? S.state.name : null // listening / speaking from a voice front end
+  const state = voice || (scrub ? 'replay' : main.status === 'running' ? 'thinking' : main.status === 'idle' ? 'idle' : main.status)
+  el('strip').className = state; document.querySelector('#strip .state').textContent = state === 'idle' ? 'idle · waiting for you' : state
+}
+const track = el('track')
+function scrubTo(frac) {
+  const L = liveSession(); if (!L) return
+  const ts = L.start + (L.last - L.start) * Math.max(0, Math.min(1, frac))
+  const S = model.replayTo(L.id, ts).latest(); if (S) scrub = { ts, S }
+  dirty = true
+}
+let scrubbing = false
+track.addEventListener('pointerdown', e => { scrubbing = true; track.setPointerCapture(e.pointerId); scrubTo(e.offsetX / track.clientWidth) })
+track.addEventListener('pointermove', e => { if (scrubbing && now0() - lastScrub > 80) { lastScrub = now0(); scrubTo(e.offsetX / track.clientWidth) } })
+track.addEventListener('pointerup', () => { scrubbing = false })
+let lastScrub = 0; const now0 = () => performance.now()
+const goLive = () => { scrub = null; dirty = true }
+el('liveBtn').onclick = goLive
+function bar(S) {
+  const L = liveSession(); if (!L) return
+  const frac = scrub ? (scrub.ts - L.start) / Math.max(1, L.last - L.start) : 1
+  track.querySelector('.fill').style.width = `${frac * 100}%`; track.querySelector('.knob').style.left = `${frac * 100}%`
+  el('liveBtn').classList.toggle('on', !scrub); document.querySelector('#bar .when').textContent = scrub ? clock(scrub.ts) : clock(L.last)
+}
+
+// ---------- mouse: hover, drag, pin ----------
+const tip = el('tip'); let mouse = null, drag = null
+const hit = (S, drawn) => { if (!mouse) return null; let best = null; for (const n of drawn) { const p = pos.get(n.id); if (p && Math.hypot(p.x - mouse.x, p.y - mouse.y) < radiusOf(n) + 4) best = n } return best }
+let hovered = null
+canvas.addEventListener('pointermove', e => { mouse = { x: e.offsetX, y: e.offsetY, px: e.clientX, py: e.clientY }; if (drag) { const p = pos.get(drag); if (p) { p.x = e.offsetX; p.y = e.offsetY; p.vx = p.vy = 0; settleUntil = performance.now() + 3000 } } })
+canvas.addEventListener('pointerdown', e => { if (hovered && hovered.id !== MAIN) { drag = hovered.id; pinned.add(drag); canvas.classList.add('grabbing'); canvas.setPointerCapture(e.pointerId) } })
+canvas.addEventListener('pointerup', () => { drag = null; canvas.classList.remove('grabbing') })
+canvas.addEventListener('dblclick', () => { if (hovered) { pinned.delete(hovered.id); settleUntil = performance.now() + 3000 } })
+canvas.addEventListener('pointerleave', () => { mouse = null; tip.style.display = 'none' })
+function hover(S, drawn, tsec) {
+  hovered = hit(S, drawn); canvas.classList.toggle('grab', !!hovered && hovered.id !== MAIN && !drag)
+  if (!hovered || drag) { tip.style.display = 'none'; return }
+  const h = hovered
+  tip.innerHTML = h.kind === 'fold' ? `<b>${h.count} ${esc(h.status)} agents</b><br>${h.members.map(m => esc(m.kind) + ' ' + esc(tagOf(m))).join(', ')}` :
+    `<b>${esc(h.kind)}</b> ${esc(tagOf(h))} · ${esc(h.status)} · ${elapsed(h, tsec)}${pinned.has(h.id) ? ' · pinned' : ''}<br>` + (h.task ? esc(h.task) + '<br>' : '') +
+    `${h.tools} tool calls` + (h.lastTool ? `, last ${esc(shortTool(h.lastTool))}` : '') + (h.tokens ? `<br>tokens ${tokensOf(h).toLocaleString()} (out ${h.tokens.output_tokens || 0})` : '')
+  tip.style.display = 'block'; tip.style.left = mouse.px + 14 + 'px'; tip.style.top = mouse.py + 14 + 'px'
+}
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return
+  if (e.key === 'c') { const S = liveSession(); if (S) { S.clear(); dirty = true } }
+  if (e.key === 'f') { document.body.classList.toggle('big'); resize(); if (big() && document.fullscreenEnabled && !document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {}); else if (!big() && document.fullscreenElement) document.exitFullscreen().catch(() => {}) }
+  if (e.key === 'm') { muted = !muted; el('hint').textContent = muted ? 'muted' : '' }
+  if (e.key === 'l') goLive()
+})
+
+// ---------- main loop ----------
+function frame(now) {
+  const S = session()
+  if (S && synced) {
+    const tsec = scrub ? scrub.ts : Date.now() / 1000
+    if (!scrub) watch(S, now, tsec)
+    const edges = links(S, tsec), f = fold(S, edges), drawn = f.nodes, allEdges = edges.filter(e => drawn.some(n => n.id === e.to) && drawn.some(n => n.id === e.from)).concat(f.extra)
+    place(S, drawn, now); step(drawn, now); draw(S, drawn, allEdges, targetRing(S), now, tsec); hover(S, drawn, tsec)
+    if (dirty || now - lastPanel > 1000) { panel(S, tsec); strip(S, tsec); bar(S); lastPanel = now; dirty = false }
+  }
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
+window.hud = { model, session, liveSession, goLive, get scrub() { return scrub } } // for debugging from the console
+</script>
+</body>
+</html>

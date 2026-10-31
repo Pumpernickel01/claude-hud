@@ -1,0 +1,3 @@
+#!/bin/sh
+# hud [toggle|open|close|big]: the Claude HUD as a window docked beside the terminal
+exec python3 "$(dirname "$0")/../hud/dock.py" "$@"

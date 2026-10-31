@@ -1,0 +1,9 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-hud",
+  "description": "A live, animated HUD of your Claude Code session, docked beside your terminal.",
+  "owner": { "name": "Pumpernickel01", "url": "https://github.com/Pumpernickel01" },
+  "plugins": [
+    { "name": "claude-hud", "source": "./", "description": "Live animated HUD of agents, tool calls, files and hosts reached, prompts and notifications; docks beside the terminal.", "version": "0.1.0", "category": "productivity" }
+  ]
+}

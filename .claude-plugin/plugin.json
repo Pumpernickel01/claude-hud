@@ -1,0 +1,11 @@
+{
+  "name": "claude-hud",
+  "displayName": "Claude HUD",
+  "version": "0.1.0",
+  "description": "A live, animated browser HUD of your Claude Code session: agents, tool calls, the files and hosts they reach, prompts and notifications. Docks beside your terminal.",
+  "author": { "name": "Pumpernickel01", "url": "https://github.com/Pumpernickel01" },
+  "homepage": "https://github.com/Pumpernickel01/claude-hud",
+  "repository": "https://github.com/Pumpernickel01/claude-hud",
+  "license": "MIT",
+  "keywords": ["hud", "monitor", "agents", "visualization", "macos", "ghostty"]
+}
