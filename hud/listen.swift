@@ -123,14 +123,16 @@ final class Jarvis {
                   let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) else { return }
             capturing = true; followUp = false; wakeAt = Date(); lastChange = Date()
             rest = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
-            log("wake: \"\(rest)\"")
+            log(dryRun ? "wake: \"\(rest)\"" : "wake (\(rest.count) chars)")  // words only in a dry run: the agent's log keeps none
             orb = showOrb(seconds: 0); openHud(); post("/state", ["name": "listening", "text": rest])
             if final { finish() }
             return
         }
-        // capturing: the words so far, as they keep arriving, shown live on the page
-        var now = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !followUp, let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) {
+        // capturing: the words so far, as they keep arriving, shown live on the page. A wake capture takes
+        // only what follows the wake phrase; a transcript without it (the recognizer restarted) changes nothing.
+        var now = rest
+        if followUp { now = transcript.trimmingCharacters(in: .whitespacesAndNewlines) }
+        else if let m = wakeRegex.firstMatch(in: transcript, range: NSRange(location: 0, length: ns.length)) {
             now = ns.substring(from: m.range.location + m.range.length).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if now != rest { rest = now; lastChange = Date(); post("/state", ["name": "listening", "text": rest]) }
@@ -149,7 +151,7 @@ final class Jarvis {
         capturing = false; cooldownUntil = Date().addingTimeInterval(3); followUntil = .distantPast
         orb?.close(); orb = nil
         if rest.isEmpty { post("/state", ["name": "idle"]); log("nothing heard: HUD open, type instead") }
-        else { log("ask: \(rest)"); post("/ask", ["text": rest, "speak": true]); awaitAnswer() }
+        else { log(dryRun ? "ask: \(rest)" : "ask (\(rest.count) chars)"); post("/ask", ["text": rest, "speak": true]); awaitAnswer() }
         rest = ""
         onRestart?()
     }

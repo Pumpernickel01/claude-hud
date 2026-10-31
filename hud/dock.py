@@ -186,6 +186,8 @@ def install_agent():
     uid = os.getuid()
     subprocess.run(["launchctl", "bootout", f"gui/{uid}/{AGENT_LABEL}"], capture_output=True)
     subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", AGENT_PLIST], check=True)
+    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)  # event markers and lengths only, never words
+    os.close(fd)
     print(f"installed {AGENT_PLIST}: the listener now runs from login on; log in {log}\n"
           "The first run asks for the microphone and speech recognition: allow both.")
 
