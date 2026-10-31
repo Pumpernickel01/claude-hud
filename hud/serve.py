@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import queue
+import secrets
 import socket
 import subprocess
 import sys
@@ -32,6 +33,15 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/model.mjs": ("model.mjs", "text/javascript; charset=utf-8")}  # hardcoded: mimetypes lacks .mjs
 POLL_S, PING_S = 0.25, 15.0
 CLAUDE = os.environ.get("CLAUDE_HUD_CLAUDE", "claude")
+TOKEN_FILE = os.environ.get("CLAUDE_HUD_TOKEN_FILE", os.path.expanduser("~/.cache/claude-hud/token"))
+TOKEN = secrets.token_hex(16)  # per run; the page gets it inline, the listener reads the 0600 file
+
+
+def write_token():
+    os.makedirs(os.path.dirname(TOKEN_FILE), mode=0o700, exist_ok=True)
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(TOKEN)
 MODEL = os.environ.get("CLAUDE_HUD_MODEL")
 SAY_CHARS = 600
 
@@ -77,12 +87,12 @@ class Jarvis:
         try:
             self.broadcast({"kind": "ask", "text": text})
             self.state("thinking")
-            cmd = [CLAUDE, "-p", text, "--output-format", "json"]
+            cmd = [CLAUDE, "-p", "--output-format", "json"]  # the prompt goes on stdin: never parsed as an option
             cmd += ["--resume", self.session] if self.started else ["--session-id", self.session]
             if MODEL:
                 cmd += ["--model", MODEL]
             try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=600, cwd=os.path.expanduser("~"))
+                r = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=600, cwd=os.path.expanduser("~"))
                 out = json.loads(r.stdout) if r.stdout.strip() else {}
                 answer = out.get("result") or (r.stderr.strip() or "no answer")[-800:]
                 error = bool(out.get("is_error")) or r.returncode != 0
@@ -92,7 +102,7 @@ class Jarvis:
             self.broadcast({"kind": "error" if error else "answer", "text": answer, "cost": out.get("total_cost_usd"), "ms": out.get("duration_ms")})
             if speak and not error and sys.platform == "darwin":
                 self.state("speaking")
-                subprocess.run(["say", answer[:SAY_CHARS]], timeout=120)
+                subprocess.run(["say"], input=answer[:SAY_CHARS], text=True, timeout=120)  # on stdin: an answer starting with - is not an option
             self.state("idle")
         finally:
             with self.lock:
@@ -153,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in FILES:
             name, ctype = FILES[path]
             with open(os.path.join(HERE, name), "rb") as f:
-                body = f.read()
+                body = f.read().replace(b"__HUD_TOKEN__", TOKEN.encode()) if name == "index.html" else f.read()
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
@@ -176,6 +186,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.local():
             self.send_error(403)
+            return
+        if self.path in ("/ask", "/state") and not secrets.compare_digest(self.headers.get("X-HUD-Token") or "", TOKEN):
+            self.send_error(403, "token")
             return
         if self.path == "/ask":
             b = self.body()
@@ -254,6 +267,7 @@ def main():
     ap.add_argument("--port", type=int, default=7431)
     ap.add_argument("--open", action="store_true", help="open the page in the default browser")
     args = ap.parse_args()
+    write_token()
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     srv.daemon_threads = True
     url = f"http://127.0.0.1:{args.port}/"

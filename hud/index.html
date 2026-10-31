@@ -113,6 +113,7 @@ const STATUS_COLOR = { running:C.blue, starting:C.yellow, done:C.green, failed:C
 const TARGET_COLOR = { file:C.peach, host:C.teal, mcp:C.mauve }
 const NOTE_LABEL = { permission_prompt:'Needs permission', idle_prompt:'Waiting for you', agent_needs_input:'Agent needs input', agent_completed:'Agent finished' }
 const HEX_ID = /^[0-9a-f]{8,}$/
+const HUD_TOKEN = '__HUD_TOKEN__' // filled in by the server for this run
 const TARGETS_SHOWN = 24
 const el = id => document.getElementById(id)
 
@@ -405,7 +406,7 @@ el('askForm').onsubmit = async e => {
   e.preventDefault()
   const text = askInput.value.trim(); if (!text) return
   askInput.value = ''
-  const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, speak }) }).catch(() => null)
+  const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HUD-Token': HUD_TOKEN }, body: JSON.stringify({ text, speak }) }).catch(() => null)
   if (!r || !r.ok) addChat('error', r && r.status === 409 ? 'Jarvis is still answering the last one' : 'could not reach the server')
 }
 let lastState = null

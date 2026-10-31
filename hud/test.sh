@@ -9,13 +9,13 @@ PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print
 cat > "$TMP/claude" <<'STUB'
 #!/bin/sh
 # a stand-in for `claude -p`: echoes the prompt back as the result, slowly enough to overlap a second ask
-sleep 0.6; printf '{"type":"result","result":"echo: %s","session_id":"s","total_cost_usd":0.01,"duration_ms":5,"is_error":false}' "$2"
+sleep 0.6; printf '{"type":"result","result":"echo: %s","session_id":"s","total_cost_usd":0.01,"duration_ms":5,"is_error":false}' "$(cat)"
 STUB
 chmod +x "$TMP/claude"
-CLAUDE_MODS_EVENT_LOG="$LOG" CLAUDE_HUD_CLAUDE="$TMP/claude" TERM_PROGRAM= __CFBundleIdentifier= python3 serve.py --port "$PORT" >/dev/null 2>&1 &
+CLAUDE_MODS_EVENT_LOG="$LOG" CLAUDE_HUD_CLAUDE="$TMP/claude" CLAUDE_HUD_TOKEN_FILE="$TMP/token" TERM_PROGRAM= __CFBundleIdentifier= python3 serve.py --port "$PORT" >/dev/null 2>&1 &
 SRV=$!; trap 'kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; rm -rf "$TMP"' EXIT
 sleep 0.5
-python3 - "$PORT" "$LOG" <<'PY'
+python3 - "$PORT" "$LOG" "$TMP/token" <<'PY'
 import sys, time, urllib.request, http.client, json
 port, log = int(sys.argv[1]), sys.argv[2]
 page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3)
@@ -41,8 +41,11 @@ read_until(b'"session_start"'); read_until(b"event: synced")
 with open(log, "a") as f: f.write(json.dumps({"ts": "2026-10-30T10:00:01.000Z", "event": "tool_end", "status": "done", "session_id": "t1", "tool": "Bash", "duration_ms": 5}) + "\n")
 read_until(b'"tool_end"')
 # Jarvis: an ask is echoed to every open stream as a chat event; a second ask while one runs is refused
-def post(path, body, origin=f"http://127.0.0.1:{port}"):
-    k = http.client.HTTPConnection("127.0.0.1", port, timeout=5); k.request("POST", path, body=json.dumps(body), headers={"Content-Type": "application/json", "Origin": origin}); return k.getresponse().status
+token = open(sys.argv[3]).read().strip()
+assert token in urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3).read().decode(), "the page carries this run's token"
+def post(path, body, origin=f"http://127.0.0.1:{port}", tok=token):
+    k = http.client.HTTPConnection("127.0.0.1", port, timeout=5); k.request("POST", path, body=json.dumps(body), headers={"Content-Type": "application/json", "Origin": origin, "X-HUD-Token": tok}); return k.getresponse().status
+assert post("/ask", {"text": "ping"}, tok="wrong") == 403, "no token, no ask"
 assert post("/ask", {"text": "ping"}) == 202
 assert post("/ask", {"text": "again"}) == 409, "a second ask must wait"
 assert post("/ask", {"text": "   "}) == 400
@@ -63,7 +66,7 @@ PY
 # listener: built once, the wake handler exercised with text (no microphone); skipped without swiftc
 if command -v swiftc >/dev/null; then
   BIN=$(python3 -c 'import dock; print(dock.build_listener())' | tail -1)
-  OUT=$("$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
+  OUT=$(CLAUDE_HUD_TOKEN_FILE="$TMP/token" "$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
   echo "$OUT" | grep -q 'ask: what time is it' && echo "$OUT" | grep -q '/state' && echo "listener wake handler ok" || { echo "listener: $OUT"; exit 1; }
 fi
 # launcher: a listening port means no second server and no browser; --no-open never starts a listener

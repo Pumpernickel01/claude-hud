@@ -16,6 +16,8 @@ let args = CommandLine.arguments
 let port = ProcessInfo.processInfo.environment["CLAUDE_MODS_HUD_PORT"] ?? "7431"
 let hudDir = ProcessInfo.processInfo.environment["CLAUDE_HUD_DIR"] ?? FileManager.default.currentDirectoryPath
 let dryRun = args.contains("--dry-run")
+let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? (NSHomeDirectory() + "/.cache/claude-hud/token")
+func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
 let wakeRegex = try! NSRegularExpression(pattern: "\\bhey,?\\s+(claude|cloud|clawed|claud|clod)\\b[,.!?]*", options: .caseInsensitive)
 
 func log(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
@@ -25,6 +27,7 @@ func post(_ path: String, _ body: [String: Any]) {
     var req = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue(token(), forHTTPHeaderField: "X-HUD-Token")  // written by the server, 0600, this run's
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
     URLSession.shared.dataTask(with: req) { _, r, e in
         if let e = e { log("\(path): \(e.localizedDescription)") }
