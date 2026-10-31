@@ -350,6 +350,10 @@ final class Listener {
 }
 
 // MARK: - main
+if args.contains("--screen") {  // for dock.py: the main display's size in points, at once and exactly
+    let f = NSScreen.main?.frame ?? .zero
+    print(Int(f.width), Int(f.height)); exit(0)
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 if args.contains("--orb") {

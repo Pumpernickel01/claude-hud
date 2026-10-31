@@ -32,7 +32,14 @@ MENU_BAR = 25
 
 
 def screen():
-    """Main display size in points (what Chrome's window flags use), from system_profiler."""
+    """Main display size in points: from the listener app when built (instant, exact), else system_profiler."""
+    if os.path.isfile(LISTENER):
+        try:
+            w, h = subprocess.run([LISTENER, "--screen"], capture_output=True, text=True, timeout=5).stdout.split()
+            if int(w) > 0:
+                return int(w), int(h)
+        except (ValueError, OSError, subprocess.SubprocessError):
+            pass
     try:
         out = subprocess.run(["system_profiler", "SPDisplaysDataType", "-json"], capture_output=True, text=True, timeout=10).stdout
         for gpu in json.loads(out).get("SPDisplaysDataType", []):
