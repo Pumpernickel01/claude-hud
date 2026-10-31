@@ -197,8 +197,20 @@ def install_agent():
     with open(AGENT_PLIST, "w", encoding="utf-8") as f:
         f.write(agent_plist(APP, log))
     uid = os.getuid()
+    subprocess.run(["plutil", "-lint", AGENT_PLIST], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["launchctl", "bootout", f"gui/{uid}/{AGENT_LABEL}"], capture_output=True)
-    subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", AGENT_PLIST], check=True)
+    for _ in range(25):  # bootout returns before the job is gone; bootstrapping over it fails with "5: Input/output error"
+        if subprocess.run(["launchctl", "print", f"gui/{uid}/{AGENT_LABEL}"], capture_output=True).returncode != 0:
+            break
+        time.sleep(0.2)
+    subprocess.run(["pkill", "-f", "Claude HUD Listener.app/Contents/MacOS/listen"], capture_output=True)
+    for attempt in range(5):
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", AGENT_PLIST], capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+        time.sleep(1.0)
+    else:
+        sys.exit(f"launchctl bootstrap kept failing: {r.stderr.strip()}\nTry: launchctl load -w {AGENT_PLIST}")
     fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)  # event markers and lengths only, never words
     os.close(fd)
     print(f"installed {AGENT_PLIST}: the listener now runs from login on; log in {log}\n"
