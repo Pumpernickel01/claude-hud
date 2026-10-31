@@ -24,7 +24,18 @@ let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? 
 func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
 let wakeRegex = try! NSRegularExpression(pattern: "\\bhey,?\\s+(claude|cloud|clawed|claud|clod)\\b[,.!?]*", options: .caseInsensitive)
 
-func log(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+// Lines go to stderr and to ~/.cache/claude-hud/listen.log (0600): launched as an app, stderr goes nowhere.
+let logPath = NSHomeDirectory() + "/.cache/claude-hud/listen.log"
+func log(_ s: String) {
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    let line = (stamp + " " + s + "\n").data(using: .utf8)!
+    FileHandle.standardError.write(line)
+    if !FileManager.default.fileExists(atPath: logPath) {
+        try? FileManager.default.createDirectory(atPath: (logPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        FileManager.default.createFile(atPath: logPath, contents: nil, attributes: [.posixPermissions: 0o600])
+    }
+    if let h = FileHandle(forWritingAtPath: logPath) { h.seekToEndOfFile(); h.write(line); h.closeFile() }
+}
 
 func post(_ path: String, _ body: [String: Any]) {
     if dryRun { log("POST \(path) \(body)"); return }
@@ -215,6 +226,7 @@ final class Listener {
         SFSpeechRecognizer.requestAuthorization { status in
             AVCaptureDevice.requestAccess(for: .audio) { mic in
                 DispatchQueue.main.async {
+                    log("permissions: speech \(status == .authorized ? "ok" : "no (\(status.rawValue))"), microphone \(mic ? "ok" : "no (\(AVCaptureDevice.authorizationStatus(for: .audio).rawValue))")")
                     if status == .authorized && mic { self.begin(); return }
                     if !announced {
                         log((status == .authorized ? "" : "speech recognition not allowed: System Settings › Privacy & Security › Speech Recognition. ")
