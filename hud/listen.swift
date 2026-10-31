@@ -22,10 +22,10 @@ let hudDir = ProcessInfo.processInfo.environment["CLAUDE_HUD_DIR"]
 let dryRun = args.contains("--dry-run")
 let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? (NSHomeDirectory() + "/.cache/claude-hud/token")
 func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
-let wakeRegex = try! NSRegularExpression(pattern: "\\bhey,?\\s+(claude|cloud|clawed|claud|clod)\\b[,.!?]*", options: .caseInsensitive)
+let wakeRegex = try! NSRegularExpression(pattern: "\\b(hey|hay|hi|a)[,.]?\\s+(claude|cloud|clawed|claud|clod|clyde)\\b[,.!?]*", options: .caseInsensitive)
 
 // Lines go to stderr and to ~/.cache/claude-hud/listen.log (0600): launched as an app, stderr goes nowhere.
-let logPath = NSHomeDirectory() + "/.cache/claude-hud/listen.log"
+let logPath = ProcessInfo.processInfo.environment["CLAUDE_HUD_LOG"] ?? (NSHomeDirectory() + "/.cache/claude-hud/listen.log")
 func log(_ s: String) {
     let stamp = ISO8601DateFormatter().string(from: Date())
     let line = (stamp + " " + s + "\n").data(using: .utf8)!
@@ -238,14 +238,21 @@ final class Listener {
         }
     }
 
+    var heard = 0, lastBeat = Date.distantPast, lastErr = Date.distantPast
+
     func begin() {
         let input = engine.inputNode
         if !engine.isRunning {
             let format = input.outputFormat(forBus: 0)
+            input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in self?.request?.append(buffer) }
             engine.prepare()
-            do { try engine.start() } catch { log("audio engine: \(error)"); exit(1) }
-            log("listening for \"Hey Claude\" (on-device)")
+            do { try engine.start() } catch { log("audio engine failed to start: \(error.localizedDescription); retrying in 10 s"); DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.begin() }; return }
+            NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+                log("audio configuration changed (input device?): restarting the engine")
+                self?.engine.stop(); self?.begin()
+            }
+            log("listening for \"Hey Claude\" (on-device); input \(Int(format.sampleRate)) Hz, \(format.channelCount) ch")
         }
         newRequest()
     }
@@ -262,7 +269,15 @@ final class Listener {
         request = req
         task = recognizer!.recognitionTask(with: req) { [weak self] result, error in
             guard let self = self, mine == self.gen else { return }  // an old request: nothing it says matters now
-            if let r = result { jarvis.handle(transcript: r.bestTranscription.formattedString, final: r.isFinal) }
+            if let r = result {
+                let t = r.bestTranscription.formattedString
+                self.heard += 1
+                if Date().timeIntervalSince(self.lastBeat) > 3 { self.lastBeat = Date(); log("hearing: \(self.heard) results so far, latest \(t.count) chars") }  // lengths only, never words
+                jarvis.handle(transcript: t, final: r.isFinal)
+            }
+            if let e = error as NSError?, Date().timeIntervalSince(self.lastErr) > 5 {
+                self.lastErr = Date(); log("recognition ended: \(e.domain) \(e.code) \(e.localizedDescription); starting over")
+            }
             if error != nil || (result?.isFinal ?? false) { DispatchQueue.main.async { self.restart() } }
         }
         restartTimer?.invalidate()
@@ -272,7 +287,7 @@ final class Listener {
     /// The current request is dropped at once (nothing it still delivers counts, so the Mac's own voice at
     /// the end of an answer can never become a follow-up); the next one starts a moment later. Coalesced.
     func restart() {
-        guard engine.isRunning else { return }
+        guard engine.isRunning else { begin(); return }  // the engine died with the input device: bring it back
         gen += 1
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
