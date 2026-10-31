@@ -192,9 +192,10 @@ final class Listener {
     func start() {
         guard let recognizer = recognizer, recognizer.isAvailable else { log("speech recognizer unavailable"); exit(1) }
         SFSpeechRecognizer.requestAuthorization { status in
-            guard status == .authorized else { log("speech recognition not allowed: System Settings › Privacy & Security › Speech Recognition"); exit(1) }
+            // a refusal is remembered by macOS: exit 0 so launchd does not retry it every ten seconds
+            guard status == .authorized else { log("speech recognition not allowed: System Settings › Privacy & Security › Speech Recognition"); exit(0) }
             AVCaptureDevice.requestAccess(for: .audio) { ok in
-                guard ok else { log("microphone not allowed: System Settings › Privacy & Security › Microphone"); exit(1) }
+                guard ok else { log("microphone not allowed: System Settings › Privacy & Security › Microphone"); exit(0) }
                 DispatchQueue.main.async { self.begin() }
             }
         }

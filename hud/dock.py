@@ -168,7 +168,7 @@ def agent_plist(python, dock, log):
 <key>Label</key><string>{AGENT_LABEL}</string>
 <key>ProgramArguments</key><array><string>{x(python)}</string><string>{x(dock)}</string><string>listen</string></array>
 <key>RunAtLoad</key><true/>
-<key>KeepAlive</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>10</integer>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
 <key>StandardErrorPath</key><string>{x(log)}</string>
