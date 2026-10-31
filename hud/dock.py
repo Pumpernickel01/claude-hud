@@ -74,7 +74,8 @@ def place(x, y, w, h, tries=40):
               "-e", "set x2 to (item 5 of argv) as integer", "-e", "set y2 to (item 6 of argv) as integer",
               "-e", "set bounds of w to {x1, y1, x2, y2}",
               "-e", "delay 0.5",  # the move applies a moment later; reading at once returns the old bounds
-              "-e", "return bounds of w as text",
+              "-e", "set b to bounds of w",
+              "-e", "return (item 1 of b as text) & \",\" & (item 2 of b as text) & \",\" & (item 3 of b as text) & \",\" & (item 4 of b as text)",
               "-e", "end tell", "-e", "end run", "--", BROWSER, URL, str(x), str(y), str(x + w), str(y + h)]
     for _ in range(tries):
         r = subprocess.run(script, capture_output=True, text=True, timeout=5)
