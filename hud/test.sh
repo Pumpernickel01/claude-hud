@@ -9,7 +9,9 @@ PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print
 cat > "$TMP/claude" <<'STUB'
 #!/bin/sh
 # a stand-in for `claude -p`: echoes the prompt back as the result, slowly enough to overlap a second ask
-sleep 0.6; printf '{"type":"result","result":"echo: %s","session_id":"s","total_cost_usd":0.01,"duration_ms":5,"is_error":false}' "$(cat)"
+P="$(cat)"
+if [ "$P" = "inuse-once" ] && [ ! -f "$0.marker" ]; then touch "$0.marker"; printf '{"type":"result","result":"Error: Session ID x is already in use.","is_error":true}'; exit 1; fi
+sleep 0.6; printf '{"type":"result","result":"echo: %s","session_id":"s","total_cost_usd":0.01,"duration_ms":5,"is_error":false}' "$P"
 STUB
 chmod +x "$TMP/claude"
 CLAUDE_MODS_EVENT_LOG="$LOG" CLAUDE_HUD_CLAUDE="$TMP/claude" CLAUDE_HUD_TOKEN_FILE="$TMP/token" TERM_PROGRAM= __CFBundleIdentifier= python3 serve.py --port "$PORT" >/dev/null 2>&1 &
@@ -58,6 +60,8 @@ assert post("/cancel", {}) == 200, "nothing to cancel: 200"
 assert post("/ask", {"text": "slow one"}) == 202
 time.sleep(0.15); assert post("/cancel", {}) == 204, "a running ask is cancelled: 204"
 read_until(b'"kind": "error", "text": "cancelled"')
+time.sleep(0.8); assert post("/ask", {"text": "inuse-once"}) == 202  # a session reported in use is replaced and the ask retried
+read_until(b'echo: inuse-once')
 assert stream.count(b'"state":"listening"') == 1, "a live transcript must not log a second state record"
 print("server smoke test ok")
 PY

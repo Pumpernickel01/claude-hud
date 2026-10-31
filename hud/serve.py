@@ -97,32 +97,41 @@ class Jarvis:
         self.cancelled = True
         if p and p.poll() is None:
             p.terminate()
+            threading.Timer(3.0, lambda: p.poll() is None and p.kill()).start()  # a call that ignores the request is killed
         return True
 
     def run(self, text, speak):
         try:
             self.broadcast({"kind": "ask", "text": text})
             self.state("thinking")
-            cmd = [CLAUDE, "-p", "--output-format", "json"]  # the prompt goes on stdin: never parsed as an option
-            cmd += ["--resume", self.session] if self.started else ["--session-id", self.session]
-            if MODEL:
-                cmd += ["--model", MODEL]
             self.cancelled = False
-            try:
-                self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.expanduser("~"))
-                stdout, stderr = self.proc.communicate(text, timeout=600)
-                out = json.loads(stdout) if stdout.strip() else {}
-                answer = out.get("result") or (stderr.strip() or "no answer")[-800:]
-                error = bool(out.get("is_error")) or self.proc.returncode != 0
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.communicate()  # reaped: no orphan keeps running after the timeout
-                answer, error, out = "claude took longer than ten minutes and was stopped", True, {}
-            except (OSError, ValueError, subprocess.SubprocessError) as e:
-                answer, error, out = f"claude failed: {e}", True, {}
+            for attempt in (1, 2):
+                cmd = [CLAUDE, "-p", "--output-format", "json"]
+                cmd += ["--resume", self.session] if self.started else ["--session-id", self.session]
+                if MODEL:
+                    cmd += ["--model", MODEL]
+                try:
+                    self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.expanduser("~"))
+                    stdout, stderr = self.proc.communicate(text, timeout=600)
+                    out = json.loads(stdout) if stdout.strip() else {}
+                    answer = out.get("result") or (stderr.strip() or "no answer")[-800:]
+                    error = bool(out.get("is_error")) or self.proc.returncode != 0
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
+                    self.proc.communicate()  # reaped: no orphan keeps running after the timeout
+                    answer, error, out = "claude took longer than ten minutes and was stopped", True, {}
+                except (OSError, ValueError, subprocess.SubprocessError) as e:
+                    answer, error, out = f"claude failed: {e}", True, {}
+                if error and attempt == 1 and "already in use" in answer and not self.cancelled:
+                    # a cancelled call can leave the session marked in use: go on in a fresh conversation
+                    print("jarvis: session in use, starting a new conversation", file=sys.stderr, flush=True)
+                    self.session, self.started = str(uuid.uuid4()), False
+                    continue
+                break
             if self.cancelled:
                 answer, error = "cancelled", True
             self.started = self.started or not error
+            print("jarvis: " + ("error: " + answer[:300] if error else f"answer, {len(answer)} chars, ${out.get('total_cost_usd', 0)}"), file=sys.stderr, flush=True)  # errors in full, answers by length
             self.broadcast({"kind": "error" if error else "answer", "text": answer, "cost": out.get("total_cost_usd"), "ms": out.get("duration_ms")})
             if speak and not error and sys.platform == "darwin":
                 self.state("speaking")
