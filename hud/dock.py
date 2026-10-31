@@ -157,6 +157,9 @@ def build_listener():
     os.makedirs(os.path.dirname(LISTENER), exist_ok=True)
     with open(os.path.join(APP, "Contents", "Info.plist"), "w", encoding="utf-8") as f:
         f.write(PLIST)
+    os.makedirs(os.path.join(APP, "Contents", "Resources"), exist_ok=True)
+    with open(os.path.join(APP, "Contents", "Resources", "hud_dir"), "w", encoding="utf-8") as f:
+        f.write(HERE + "\n")  # the app gets no environment when macOS launches it: this is how it finds dock.py
     print("building the listener (once)…", flush=True)
     subprocess.run(["swiftc", "-swift-version", "5", "-O", src, "-o", LISTENER], check=True)
     subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", "dev.claude-hud.listen", APP], check=True)
@@ -167,14 +170,16 @@ AGENT_LABEL = "dev.claude-hud.listen"
 AGENT_PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{AGENT_LABEL}.plist")
 
 
-def agent_plist(python, dock, log):
-    """A launchd agent: the listener from login on, restarted if it dies. Values are XML-escaped."""
+def agent_plist(app, log):
+    """A launchd agent: the listener from login on, restarted if it dies. It goes through `open`, the
+    normal app launch path, which is what makes macOS treat it as an app, ask for the microphone and list
+    it in Privacy & Security; an executable run straight from launchd is refused without a word."""
     from xml.sax.saxutils import escape as x
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>{AGENT_LABEL}</string>
-<key>ProgramArguments</key><array><string>{x(python)}</string><string>{x(dock)}</string><string>listen</string></array>
+<key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-W</string><string>-g</string><string>-a</string><string>{x(app)}</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>10</integer>
@@ -190,7 +195,7 @@ def install_agent():
     log = os.path.expanduser("~/.cache/claude-hud/listen.log")
     os.makedirs(os.path.dirname(AGENT_PLIST), exist_ok=True)
     with open(AGENT_PLIST, "w", encoding="utf-8") as f:
-        f.write(agent_plist(sys.executable, os.path.abspath(__file__), log))
+        f.write(agent_plist(APP, log))
     uid = os.getuid()
     subprocess.run(["launchctl", "bootout", f"gui/{uid}/{AGENT_LABEL}"], capture_output=True)
     subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", AGENT_PLIST], check=True)

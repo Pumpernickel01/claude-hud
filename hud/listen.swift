@@ -14,7 +14,11 @@ import Speech
 
 let args = CommandLine.arguments
 let port = ProcessInfo.processInfo.environment["CLAUDE_MODS_HUD_PORT"] ?? "7431"
-let hudDir = ProcessInfo.processInfo.environment["CLAUDE_HUD_DIR"] ?? FileManager.default.currentDirectoryPath
+// where dock.py lives: from the environment, else the note the build left in the app bundle (launched by
+// the Finder, launchd or `open`, the app gets no environment of ours)
+let hudDir = ProcessInfo.processInfo.environment["CLAUDE_HUD_DIR"]
+    ?? (Bundle.main.resourcePath.flatMap { try? String(contentsOfFile: $0 + "/hud_dir", encoding: .utf8) })?.trimmingCharacters(in: .whitespacesAndNewlines)
+    ?? FileManager.default.currentDirectoryPath
 let dryRun = args.contains("--dry-run")
 let tokenFile = ProcessInfo.processInfo.environment["CLAUDE_HUD_TOKEN_FILE"] ?? (NSHomeDirectory() + "/.cache/claude-hud/token")
 func token() -> String { (try? String(contentsOfFile: tokenFile, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }

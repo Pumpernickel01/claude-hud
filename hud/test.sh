@@ -76,8 +76,8 @@ fi
 # the launchd agent plist, without touching launchd
 python3 - <<'PY'
 import sys, plistlib; sys.path.insert(0, '.'); import dock
-d = plistlib.loads(dock.agent_plist('/usr/bin/python3', '/x/dock.py', '/x/a b.log').encode())
-assert d['ProgramArguments'] == ['/usr/bin/python3', '/x/dock.py', 'listen'] and d['KeepAlive'] == {'SuccessfulExit': False} and d['StandardErrorPath'] == '/x/a b.log'
+d = plistlib.loads(dock.agent_plist('/x/Listener.app', '/x/a b.log').encode())
+assert d['ProgramArguments'] == ['/usr/bin/open', '-W', '-g', '-a', '/x/Listener.app'] and d['KeepAlive'] == {'SuccessfulExit': False} and d['StandardErrorPath'] == '/x/a b.log'
 print("agent plist ok")
 PY
 # launcher: a listening port means no second server and no browser; --no-open never starts a listener
