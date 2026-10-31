@@ -65,12 +65,14 @@ def place(x, y, w, h, tries=40):
     """Chrome on macOS ignores --window-position/--window-size for an app window, so the window is moved
     through Chrome's own scripting once it exists: the window whose tab shows the HUD's URL. The first
     set often lands while the window is still being created, so it is repeated until the bounds read back
-    close to what was asked. Strings travel as argv, never inside the script text. True when placed."""
+    close to what was asked. Numbers and the URL travel as argv; only the app name is in the script text."""
+    app = BROWSER.replace("\\", "\\\\").replace('"', '\\"')  # the app name must be literal: AppleScript needs its dictionary at compile time
     script = ["osascript", "-e", "on run argv",
-              "-e", "tell application (item 1 of argv)",
+              "-e", f'tell application "{app}"',
               "-e", "set w to first window whose URL of active tab starts with (item 2 of argv)",
-              "-e", "set bounds of w to {(item 3 of argv) as integer, (item 4 of argv) as integer, "
-                    "(item 5 of argv) as integer, (item 6 of argv) as integer}",
+              "-e", "set x1 to (item 3 of argv) as integer", "-e", "set y1 to (item 4 of argv) as integer",
+              "-e", "set x2 to (item 5 of argv) as integer", "-e", "set y2 to (item 6 of argv) as integer",
+              "-e", "set bounds of w to {x1, y1, x2, y2}",
               "-e", "delay 0.5",  # the move applies a moment later; reading at once returns the old bounds
               "-e", "return bounds of w as text",
               "-e", "end tell", "-e", "end run", "--", BROWSER, URL, str(x), str(y), str(x + w), str(y + h)]
@@ -87,26 +89,6 @@ def place(x, y, w, h, tries=40):
     return False
 
 
-def remember(x, y, w, h):
-    """Chrome restores an app window where it last was, from the profile's Preferences; writing that entry
-    before the first launch opens the window in place and leaves place() as the fallback."""
-    from urllib.parse import urlsplit
-    pref = os.path.join(PROFILE, "Default", "Preferences")
-    try:
-        with open(pref, encoding="utf-8") as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    u = urlsplit(URL)
-    node = d.setdefault("browser", {}).setdefault("app_window_placement", {})
-    for part in f"{u.hostname}_{u.path}".split("."):  # Chrome nests the key on dots: 127 / 0 / 0 / 1_/
-        node = node.setdefault(part, {})
-    node.update({"left": x, "top": y, "right": x + w, "bottom": y + h, "maximized": False})
-    os.makedirs(os.path.dirname(pref), mode=0o700, exist_ok=True)
-    with open(pref, "w", encoding="utf-8") as f:
-        json.dump(d, f)
-
-
 def open_window(big=False):
     ensure_server()
     if pids():
@@ -114,14 +96,16 @@ def open_window(big=False):
         return
     os.makedirs(PROFILE, mode=0o700, exist_ok=True)
     url = URL + ("?big=1" if big else "")
-    box = None
-    if not big:
-        box = geometry(*screen())  # system_profiler takes a few seconds, once per open
-        remember(*box)
+    box = None if big else geometry(*screen())  # system_profiler takes a few seconds, once per open
     subprocess.Popen(["open", "-na", BROWSER, "--args", f"--user-data-dir={PROFILE}", f"--app={url}",
                       "--no-first-run", "--no-default-browser-check"] + (["--start-fullscreen"] if big else []),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if box:
+        for _ in range(50):  # scripting Chrome while it starts is slow and fails: wait for its process first
+            if pids():
+                break
+            time.sleep(0.2)
+        time.sleep(1.0)
         place(*box)
 
 

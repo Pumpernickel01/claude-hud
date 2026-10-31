@@ -56,7 +56,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
+    def local(self):
+        """True for a request addressed to this server by a loopback name: a web page elsewhere that rebinds
+        its DNS name to 127.0.0.1 sends its own Host and gets nothing; a POST must also come from our origin."""
+        host = (self.headers.get("Host") or "").lower()
+        port = self.server.server_address[1]
+        if host not in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+            return False
+        origin = self.headers.get("Origin")
+        return self.command != "POST" or origin in (f"http://{host}", None)
+
     def do_GET(self):
+        if not self.local():
+            self.send_error(403)
+            return
         path = self.path.split("?", 1)[0]
         if path in FILES:
             name, ctype = FILES[path]
@@ -66,6 +79,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'")
             self.end_headers()
             self.wfile.write(body)
         elif path == "/events":
@@ -74,6 +88,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if not self.local():
+            self.send_error(403)
+            return
         if self.path == "/focus" and TERMINAL:
             subprocess.Popen(["osascript", "-e", "on run argv", "-e", "tell application id (item 1 of argv) to activate",
                               "-e", "end run", "--", TERMINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

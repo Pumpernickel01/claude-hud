@@ -34,7 +34,7 @@ def mods_monitor_installed():
         return False
 
 
-if not os.environ.get("CLAUDE_HUD_FORCE") and mods_monitor_installed() and os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) != "claude-mods":
+if not os.environ.get("CLAUDE_HUD_FORCE") and mods_monitor_installed():
     sys.exit(0)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +50,15 @@ SCP_HOST = re.compile(r"\b[\w.-]+@([\w.-]+):")
 NET = {"ssh", "sftp", "mosh", "telnet", "nc", "ncat", "netcat", "socat", "ping", "ping6", "traceroute", "mtr",
        "nmap", "dig", "nslookup", "host", "ftp", "curl", "wget", "http", "https", "xh", "scp", "rsync"}
 PREFIX = {"sudo", "time", "exec", "command", "nohup", "env"}
+
+
+def hostlike(t):
+    labels = t.split(".")
+    if len(labels) < 2 or any(not 0 < len(l) <= 63 for l in labels):
+        return False
+    if all(l.isdigit() for l in labels):
+        return len(labels) == 4 and all(int(l) <= 255 for l in labels)
+    return all(re.match(r"^[\w-]+$", l) for l in labels) and labels[-1].isalpha()
 
 
 def bash_hosts(command):
@@ -71,11 +80,14 @@ def bash_hosts(command):
             for m in SCP_HOST.finditer(segment):
                 add(m.group(1))
         if program in NET and len(found) == before:
+            prev = ""
             for t in tokens[1:]:
-                t = re.sub(r"^[^@\s]+@", "", t)
-                # shortcut: a bare argument counts only with a dot in it (host.example, an IP); prose inside
-                # heredocs otherwise reads "ping the server" as a host. Widen when a dotless host matters.
-                if not t.startswith("-") and re.match(r"^[\w-]+(\.[\w-]+)+$", t):
+                t, flag = re.sub(r"^[^@\s]+@", "", t), prev.startswith("-")
+                prev = t
+                # shortcut: a bare argument counts only when shaped like a host (labels of up to 63 chars, an
+                # alphabetic top-level label, or an IPv4) and does not follow an option such as -H or -u, so a
+                # token or header value is never taken for a host. Widen when a dotless host matters.
+                if not t.startswith("-") and not flag and hostlike(t):
                     add(t)
                     break
     return found

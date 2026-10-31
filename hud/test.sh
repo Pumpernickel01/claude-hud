@@ -20,7 +20,9 @@ try:
     urllib.request.urlopen(f"http://127.0.0.1:{port}/../serve.py", timeout=3); raise SystemExit("unexpected path served")
 except urllib.error.HTTPError as e:
     assert e.code == 404, e.code
-f = http.client.HTTPConnection("127.0.0.1", port, timeout=3); f.request("POST", "/focus"); assert f.getresponse().status == 404, "focus without a known terminal must 404"
+f = http.client.HTTPConnection("127.0.0.1", port, timeout=3); f.request("POST", "/focus", headers={"Origin": f"http://127.0.0.1:{port}"}); assert f.getresponse().status == 404, "focus without a known terminal must 404"
+f = http.client.HTTPConnection("127.0.0.1", port, timeout=3); f.request("POST", "/focus", headers={"Origin": "http://evil.example"}); assert f.getresponse().status == 403, "foreign origin must be refused"
+f = http.client.HTTPConnection("127.0.0.1", port, timeout=3); f.request("GET", "/events", headers={"Host": "hud.evil.example"}); assert f.getresponse().status == 403, "foreign Host must be refused (DNS rebinding)"
 c = http.client.HTTPConnection("127.0.0.1", port, timeout=5); c.request("GET", "/events"); r = c.getresponse()
 assert r.headers["Content-Type"].startswith("text/event-stream")
 def read_until(needle):
@@ -39,11 +41,6 @@ from dock import geometry
 assert geometry(2000, 1000, 'right', 0.4) == (1200, 25, 800, 975), geometry(2000, 1000, 'right', 0.4)
 assert geometry(2000, 1000, 'left', 0.25) == (0, 25, 500, 975)
 assert geometry(2000, 1000, '10,20,300,400') == (10, 20, 300, 400)
-import os, json, tempfile, dock
-dock.PROFILE = tempfile.mkdtemp(); dock.URL = "http://127.0.0.1:7431/"
-dock.remember(10, 20, 300, 400)
-d = json.load(open(os.path.join(dock.PROFILE, "Default", "Preferences")))
-assert d["browser"]["app_window_placement"]["127"]["0"]["0"]["1_/"]["right"] == 310, d
 print("dock geometry ok")
 PY
 # launcher: a listening port means no second server and no browser

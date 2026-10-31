@@ -318,7 +318,7 @@ function draw(S, drawn, edges, ring, now, tsec) {
 }
 
 // ---------- side panel, strip, scrubber ----------
-const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])) // text and attributes: log data is untrusted
 const fmtMs = ms => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
 const elapsed = (n, tsec) => { const s = Math.max(0, Math.round((n.end ?? tsec) - n.start)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}` }
 const cls = st => ({ running: 'live', starting: 'run', done: 'ok', failed: 'bad', gone: 'gone', idle: 'ok' }[st] || '')
