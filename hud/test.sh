@@ -68,7 +68,8 @@ print("dock geometry ok")
 PY
 # listener: built once, the wake handler exercised with text (no microphone); skipped without swiftc
 if command -v swiftc >/dev/null; then
-  BIN=$(python3 -c 'import dock; print(dock.build_listener())' | tail -1)
+  BIN=$(CLAUDE_HUD_APP="$TMP/Listener.app" python3 -c 'import dock; print(dock.build_listener())' | tail -1)
+  codesign --verify "$TMP/Listener.app" && echo "listener app bundle signed ok"
   OUT=$(CLAUDE_HUD_TOKEN_FILE="$TMP/token" "$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
   echo "$OUT" | grep -q 'ask: what time is it' && echo "$OUT" | grep -q '/state' && echo "listener wake handler ok" || { echo "listener: $OUT"; exit 1; }
 fi

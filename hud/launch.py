@@ -27,7 +27,7 @@ def listener_wanted():
     if os.environ.get("CLAUDE_HUD_LISTEN") != "1":
         return
     # the binary, or a dock.py listen still building it: either means one is on its way
-    if subprocess.run(["pgrep", "-f", "/.cache/claude-hud/listen|dock.py listen"], capture_output=True).returncode == 0:
+    if subprocess.run(["pgrep", "-f", "Claude HUD Listener.app|dock.py listen"], capture_output=True).returncode == 0:
         return
     dock = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dock.py")
     subprocess.Popen([sys.executable, dock, "listen"], start_new_session=True,

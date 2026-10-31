@@ -34,9 +34,14 @@ this already (its `hud` folder); this plugin's hooks stay quiet when they see
 `bin/hud listen --install` makes the listener a login item (a launchd agent,
 restarted if it dies), so it is always on, like a phone's assistant.
 `hud/listen.swift` is built once with the Swift compiler from the Command Line
-Tools and uses Apple's on-device speech recognition: nothing is sent anywhere
+Tools into `~/Applications/Claude HUD Listener.app` (a real app, so macOS can
+name it in the permission dialogs and remember the answer; a bare binary
+started at login is refused without asking) and uses Apple's on-device
+speech recognition: nothing is sent anywhere
 and nothing is kept until it hears "Hey Claude". The first time it runs, macOS
-asks for the microphone and for speech recognition; allow both.
+asks for the microphone and for speech recognition; allow both. If you
+refused once, flip the switches in System Settings › Privacy & Security: the
+listener checks every 30 seconds and starts on its own.
 `bin/hud listen --uninstall` removes it; `bin/hud listen` runs it once by hand.
 
 On "Hey Claude": an orb pulses in the middle of the screen for as long as it
@@ -48,7 +53,8 @@ conversation flows. Say only "Hey Claude" and the wake screen opens with its
 input focused so you can type instead; esc closes it, `/` focuses it any time.
 One conversation continues for as long as the server runs.
 
-`~/.cache/claude-hud/listen --orb` shows the animation on its own;
+`"~/Applications/Claude HUD Listener.app/Contents/MacOS/listen" --orb` shows the
+animation on its own;
 `--text "hey claude what time is it" --dry-run` runs the wake handler without
 a microphone.
 

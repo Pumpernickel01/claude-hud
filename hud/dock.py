@@ -127,12 +127,21 @@ def close_window():
             pass
 
 
-LISTENER = os.path.expanduser("~/.cache/claude-hud/listen")
+# The listener is a real app bundle: macOS grants the microphone and speech recognition to an app it can
+# name and remember. A bare binary started by launchd has no such identity and is refused without a prompt.
+APP = os.path.expanduser(os.environ.get("CLAUDE_HUD_APP", "~/Applications/Claude HUD Listener.app"))
+LISTENER = os.path.join(APP, "Contents", "MacOS", "listen")
 PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>listen</string>
 <key>CFBundleIdentifier</key><string>dev.claude-hud.listen</string>
-<key>CFBundleName</key><string>Claude HUD listener</string>
+<key>CFBundleName</key><string>Claude HUD Listener</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSUIElement</key><true/>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSMicrophoneUsageDescription</key><string>Listens for "Hey Claude" on this Mac; audio never leaves it.</string>
 <key>NSSpeechRecognitionUsageDescription</key><string>Recognizes "Hey Claude" and what you ask next, on this Mac only.</string>
 </dict></plist>
@@ -140,18 +149,17 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def build_listener():
-    """Compiles listen.swift once (or when it changed) with an embedded Info.plist, which macOS requires
-    before a program may use the microphone or speech recognition."""
+    """Compiles listen.swift once (or when it changed) into the app bundle and signs it ad hoc, so the
+    permission grants stick to it across rebuilds."""
     src = os.path.join(HERE, "listen.swift")
     if os.path.isfile(LISTENER) and os.path.getmtime(LISTENER) >= os.path.getmtime(src):
         return LISTENER
-    os.makedirs(os.path.dirname(LISTENER), mode=0o700, exist_ok=True)
-    plist = LISTENER + ".plist"
-    with open(plist, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(LISTENER), exist_ok=True)
+    with open(os.path.join(APP, "Contents", "Info.plist"), "w", encoding="utf-8") as f:
         f.write(PLIST)
     print("building the listener (once)…", flush=True)
-    subprocess.run(["swiftc", "-swift-version", "5", "-O", src, "-o", LISTENER,
-                    "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", plist], check=True)
+    subprocess.run(["swiftc", "-swift-version", "5", "-O", src, "-o", LISTENER], check=True)
+    subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", "dev.claude-hud.listen", APP], check=True)
     return LISTENER
 
 

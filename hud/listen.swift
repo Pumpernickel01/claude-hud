@@ -183,55 +183,84 @@ final class Jarvis {
 
 let jarvis = Jarvis()
 
-// MARK: - Microphone + on-device recognition, restarted every 50 s (Apple's per-request limit)
+// MARK: - Microphone + on-device recognition
+// The audio engine runs once, its tap feeding whichever request is current. A request lives for at most
+// 50 s (Apple's limit), until the recognizer reports a final result, or until an error; then a new one
+// starts. Each request has a generation number, and callbacks from an old one are ignored, so a cancelled
+// task can never restart the loop under the one that replaced it.
 final class Listener {
     let engine = AVAudioEngine()
     let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     var request: SFSpeechAudioBufferRecognitionRequest?
     var task: SFSpeechRecognitionTask?
+    var gen = 0
+    var restartPending = false
     var restartTimer: Timer?
 
     func start() {
         guard let recognizer = recognizer, recognizer.isAvailable else { log("speech recognizer unavailable"); exit(1) }
-        SFSpeechRecognizer.requestAuthorization { status in
-            // a refusal is remembered by macOS: exit 0 so launchd does not retry it every ten seconds
-            guard status == .authorized else { log("speech recognition not allowed: System Settings › Privacy & Security › Speech Recognition"); exit(0) }
-            AVCaptureDevice.requestAccess(for: .audio) { ok in
-                guard ok else { log("microphone not allowed: System Settings › Privacy & Security › Microphone"); exit(0) }
-                DispatchQueue.main.async { self.begin() }
-            }
-        }
         jarvis.onRestart = { [weak self] in self?.restart() }
         let t = Timer(timeInterval: 0.25, repeats: true) { _ in jarvis.tick() }
         RunLoop.main.add(t, forMode: .common)
+        authorize()
+    }
+
+    /// Asks once; a refusal is remembered by macOS, so after that this only watches System Settings
+    /// (every 30 s) and goes on the moment both switches are on. Never exits: launchd would not retry.
+    func authorize(announced: Bool = false) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            AVCaptureDevice.requestAccess(for: .audio) { mic in
+                DispatchQueue.main.async {
+                    if status == .authorized && mic { self.begin(); return }
+                    if !announced {
+                        log((status == .authorized ? "" : "speech recognition not allowed: System Settings › Privacy & Security › Speech Recognition. ")
+                            + (mic ? "" : "microphone not allowed: System Settings › Privacy & Security › Microphone. ") + "waiting for it")
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 30) { self.authorize(announced: true) }
+                }
+            }
+        }
     }
 
     func begin() {
         let input = engine.inputNode
+        if !engine.isRunning {
+            let format = input.outputFormat(forBus: 0)
+            input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in self?.request?.append(buffer) }
+            engine.prepare()
+            do { try engine.start() } catch { log("audio engine: \(error)"); exit(1) }
+            log("listening for \"Hey Claude\" (on-device)")
+        }
+        newRequest()
+    }
+
+    func newRequest() {
+        gen += 1
+        let mine = gen
+        task?.cancel()
+        request?.endAudio()
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
         req.requiresOnDeviceRecognition = true
         req.contextualStrings = ["Claude", "Hey Claude"]
         request = req
-        task = recognizer!.recognitionTask(with: req) { result, error in
+        task = recognizer!.recognitionTask(with: req) { [weak self] result, error in
+            guard let self = self, mine == self.gen else { return }  // an old request: nothing it says matters now
             if let r = result { jarvis.handle(transcript: r.bestTranscription.formattedString, final: r.isFinal) }
             if error != nil || (result?.isFinal ?? false) { DispatchQueue.main.async { self.restart() } }
         }
-        let format = input.outputFormat(forBus: 0)
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, _ in req.append(buffer) }
-        engine.prepare()
-        do { try engine.start() } catch { log("audio engine: \(error)"); exit(1) }
         restartTimer?.invalidate()
-        restartTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: false) { _ in self.restart() }
-        log("listening for \"Hey Claude\" (on-device)")
+        restartTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: false) { [weak self] _ in self?.restart() }
     }
 
+    /// Coalesced: however many callers ask within the same moment, one new request starts.
     func restart() {
-        task?.cancel(); task = nil
-        request?.endAudio(); request = nil
-        engine.inputNode.removeTap(onBus: 0); engine.stop()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.begin() }
+        guard engine.isRunning, !restartPending else { return }
+        restartPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.restartPending = false
+            self.newRequest()
+        }
     }
 }
 
