@@ -10,6 +10,7 @@
 // Built by dock.py: swiftc -swift-version 5 with an embedded Info.plist (usage descriptions).
 import AppKit
 import AVFoundation
+import CoreAudio
 import Speech
 
 let args = CommandLine.arguments
@@ -36,6 +37,49 @@ let conf: [String: Double] = {
     }
     return d
 }()
+// input=builtin (default) pins the Mac's own microphone: a Bluetooth headset's microphone runs in a
+// low-quality phone mode the recognizer hears badly, and pinning keeps the headset in music quality.
+// input=default follows whatever macOS has selected.
+let inputPref: String = {
+    let path = NSHomeDirectory() + "/.config/claude-hud/listen.conf"
+    for line in ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n") {
+        let kv = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        if kv.count == 2, kv[0] == "input" { return kv[1] }
+    }
+    return "builtin"
+}()
+
+func audioProperty<T>(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope, _ value: inout T) -> Bool {
+    var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    var size = UInt32(MemoryLayout<T>.size)
+    return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr
+}
+
+func deviceName(_ id: AudioDeviceID) -> String {
+    var name: CFString = "" as CFString
+    return audioProperty(id, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, &name) ? (name as String) : "device \(id)"
+}
+
+/// The built-in microphone, or nil when there is none (a Mac mini with nothing plugged in).
+func builtInInputDevice() -> AudioDeviceID? {
+    var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return nil }
+    var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return nil }
+    for id in ids {
+        var transport: UInt32 = 0
+        guard audioProperty(id, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal, &transport), transport == kAudioDeviceTransportTypeBuiltIn else { continue }
+        var cfg = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+        var bsize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &cfg, 0, nil, &bsize) == noErr, bsize > 0 else { continue }
+        let buf = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(bsize)); defer { buf.deallocate() }
+        guard AudioObjectGetPropertyData(id, &cfg, 0, nil, &bsize, buf) == noErr else { continue }
+        if UnsafeMutableAudioBufferListPointer(buf).reduce(0, { $0 + Int($1.mNumberChannels) }) > 0 { return id }
+    }
+    return nil
+}
+
 let cancelRegex = try! NSRegularExpression(pattern: "\\b(cancel|never ?mind|forget it|scratch that|stop|wait)\\b[,.!?]*\\s*$", options: .caseInsensitive)
 let wakeRegex = try! NSRegularExpression(pattern: "\\b(?:(?:hey|hay)[,.]?\\s+(?:claude|cloud|clawed|claud|clod|clyde)|hi[,.]?\\s+claude)\\b[,.!?]*", options: .caseInsensitive)
 
@@ -261,9 +305,23 @@ final class Listener {
     var restartPending = false
     var restartTimer: Timer?
 
+    var reconfigurePending = false
+
     func start() {
         guard let recognizer = recognizer, recognizer.isAvailable else { log("speech recognizer unavailable"); exit(1) }
         jarvis.onRestart = { [weak self] in self?.restart() }
+        // once, for the life of the process: a device change (headphones on or off) stops the engine and
+        // starts it again after the system has settled, however many notifications arrive meanwhile
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self = self, !self.reconfigurePending else { return }
+            self.reconfigurePending = true
+            log("audio configuration changed: restarting the engine in a moment")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.reconfigurePending = false
+                self.engine.stop(); self.engine.inputNode.removeTap(onBus: 0)
+                self.begin()
+            }
+        }
         let t = Timer(timeInterval: 0.25, repeats: true) { _ in jarvis.tick() }
         RunLoop.main.add(t, forMode: .common)
         authorize()
@@ -292,16 +350,17 @@ final class Listener {
     func begin() {
         let input = engine.inputNode
         if !engine.isRunning {
+            var which = "system default"
+            if inputPref == "builtin", let dev = builtInInputDevice(), let unit = input.audioUnit {
+                var id = dev
+                if AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr { which = deviceName(dev) }
+            }
             let format = input.outputFormat(forBus: 0)
             input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in self?.request?.append(buffer) }
             engine.prepare()
             do { try engine.start() } catch { log("audio engine failed to start: \(error.localizedDescription); retrying in 10 s"); DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.begin() }; return }
-            NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-                log("audio configuration changed (input device?): restarting the engine")
-                self?.engine.stop(); self?.begin()
-            }
-            log("listening for \"Hey Claude\" (on-device); input \(Int(format.sampleRate)) Hz, \(format.channelCount) ch")
+            log("listening for \"Hey Claude\" (on-device); input: \(which), \(Int(format.sampleRate)) Hz, \(format.channelCount) ch")
         }
         newRequest()
     }
