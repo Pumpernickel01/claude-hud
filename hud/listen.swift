@@ -199,6 +199,7 @@ final class Jarvis {
 }
 
 let jarvis = Jarvis()
+let listener = Listener()  // held for the life of the process: its callbacks keep only weak references
 
 // MARK: - Microphone + on-device recognition
 // The audio engine runs once, its tap feeding whichever request is current. A request lives for at most
@@ -312,6 +313,6 @@ if args.contains("--orb") {
     if dryRun { exit(0) }
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { exit(0) }
 } else {
-    Listener().start()
+    listener.start()
 }
 app.run()
