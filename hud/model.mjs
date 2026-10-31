@@ -90,10 +90,15 @@ export class Model {
     for (const r of this.events) if (r.session_id === sid && parseTs(r.ts) <= ts) m.ingest(r)
     return m
   }
+  /** The session to show: the newest still running, else the newest of all (a short headless session,
+   *  such as Jarvis answering, takes the screen while it runs and gives it back when it ends). */
   latest() {
-    let best = null
-    for (const s of this.sessions.values()) if (!best || s.last > best.last) best = s
-    return best
+    let best = null, live = null
+    for (const s of this.sessions.values()) {
+      if (!best || s.last > best.last) best = s
+      if (!s.ended && (!live || s.last > live.last)) live = s
+    }
+    return live || best
   }
   ingest(rec) {
     const ev = rec.event

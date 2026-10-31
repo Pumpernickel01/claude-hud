@@ -99,3 +99,12 @@ test('state records belong to no session', () => {
   assert.equal(m.state.name, 'listening')
   assert.equal(m.sessions.size, 1, 'no session created for it')
 })
+
+test('an ended newer session gives the screen back to the running one', () => {
+  const m = new Model()
+  m.ingest(rec('session_start', { status: 'running', session_id: 'term', ts: '2026-10-30T10:00:00.000Z' }))
+  m.ingest(rec('session_start', { status: 'running', session_id: 'jarvis', ts: '2026-10-30T10:00:05.000Z' }))
+  assert.equal(m.latest().id, 'jarvis', 'the newer running session shows while it runs')
+  m.ingest(rec('session_end', { session_id: 'jarvis', ts: '2026-10-30T10:00:09.000Z' }))
+  assert.equal(m.latest().id, 'term', 'once it ends, the terminal session is back')
+})

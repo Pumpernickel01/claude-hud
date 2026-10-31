@@ -66,6 +66,8 @@ if command -v swiftc >/dev/null; then
   OUT=$("$BIN" --text "Hey Claude, what time is it" --dry-run 2>&1)
   echo "$OUT" | grep -q 'ask: what time is it' && echo "$OUT" | grep -q '/state' && echo "listener wake handler ok" || { echo "listener: $OUT"; exit 1; }
 fi
-# launcher: a listening port means no second server and no browser
+# launcher: a listening port means no second server and no browser; --no-open never starts a listener
 CLAUDE_MODS_HUD_PORT="$PORT" BROWSER=/usr/bin/false python3 launch.py
+CLAUDE_MODS_HUD_PORT="$PORT" CLAUDE_HUD_LISTEN=1 python3 launch.py --no-open
+pgrep -f "dock.py listen" >/dev/null && { echo "launch.py --no-open must not start a listener"; exit 1; } || echo "no listener from --no-open ok"
 [ "$(pgrep -f "serve.py --port $PORT" | wc -l | tr -d ' ')" = "1" ] && echo "launcher skips a running server ok"

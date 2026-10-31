@@ -26,7 +26,8 @@ def listener_wanted():
     and allowed to use the microphone and speech recognition."""
     if os.environ.get("CLAUDE_HUD_LISTEN") != "1":
         return
-    if subprocess.run(["pgrep", "-f", "/.cache/claude-hud/listen"], capture_output=True).returncode == 0:
+    # the binary, or a dock.py listen still building it: either means one is on its way
+    if subprocess.run(["pgrep", "-f", "/.cache/claude-hud/listen|dock.py listen"], capture_output=True).returncode == 0:
         return
     dock = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dock.py")
     subprocess.Popen([sys.executable, dock, "listen"], start_new_session=True,
@@ -36,10 +37,11 @@ def listener_wanted():
 def main():
     if "hud" in os.environ.get("CLAUDE_MODS_DISABLE", "").split(","):
         return
-    listener_wanted()
+    no_open = "--no-open" in sys.argv[1:]
+    if not no_open:
+        listener_wanted()  # not from dock.py's own ensure_server(): that would spawn listeners in a chain
     if listening():
         return
-    no_open = "--no-open" in sys.argv[1:]
     serve = os.path.join(os.path.dirname(os.path.abspath(__file__)), "serve.py")
     # fully detached: a child still attached to the hook would hold the session start
     subprocess.Popen([sys.executable, serve, "--port", str(PORT)], start_new_session=True,
