@@ -25,7 +25,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("CLAUDE_MODS_HUD_PORT", "7431"))
 URL = f"http://127.0.0.1:{PORT}/"
-PROFILE = os.path.expanduser("~/.cache/claude-hud/chrome")
+PROFILE = os.path.expanduser("~/.cache/claude-hud/chrome")  # the docked column
+PROFILE_FULL = PROFILE + "-full"  # full screen (wake, big): Chrome's --kiosk is honoured on a profile that never had a window placed
 BROWSER = os.environ.get("CLAUDE_HUD_BROWSER", "Google Chrome")
 MENU_BAR = 25
 
@@ -57,7 +58,8 @@ def geometry(width, height, dock=None, fraction=None):
 
 
 def pids():
-    out = subprocess.run(["pgrep", "-f", f"user-data-dir={PROFILE}"], capture_output=True, text=True).stdout
+    """Both windows' Chrome processes: the docked column's and the full-screen one's."""
+    out = subprocess.run(["pgrep", "-f", f"user-data-dir={PROFILE}"], capture_output=True, text=True).stdout  # a prefix of both
     return [int(p) for p in out.split()]
 
 
@@ -95,21 +97,28 @@ def place(x, y, w, h, tries=40):
 
 
 def open_window(big=False, wake=False):
-    """big: full screen, label-free. wake: full screen with the page in wake mode; an open window is
-    resized to the screen instead (the page enters wake mode on its own from the listening state)."""
+    """Docked column by default. big: full screen, label-free. wake: full screen with the page in wake mode.
+    Full screen is a separate Chrome profile started with --kiosk: no Apple Events, so it works from the
+    listener too. A window of the other kind is closed first; the orb covers the second it takes."""
     ensure_server()
-    W, H = screen()  # a few seconds of system_profiler, once per open
+    full = big or wake
     if pids():
-        subprocess.run(["osascript", "-e", f'tell application "{BROWSER}" to activate'], capture_output=True)
-        if wake:
-            place(0, 0, W, H, tries=4)
-        return
-    os.makedirs(PROFILE, mode=0o700, exist_ok=True)
+        running_full = subprocess.run(["pgrep", "-f", f"user-data-dir={PROFILE_FULL}"], capture_output=True).returncode == 0
+        if running_full == full:
+            subprocess.run(["osascript", "-e", f'tell application "{BROWSER}" to activate'], capture_output=True)
+            return
+        close_window()
+        for _ in range(30):
+            if not pids():
+                break
+            time.sleep(0.1)
+    profile = PROFILE_FULL if full else PROFILE
+    os.makedirs(profile, mode=0o700, exist_ok=True)
     url = URL + ("?big=1" if big else "?wake=1" if wake else "")
-    box = None if big else (0, 0, W, H) if wake else geometry(W, H)
-    subprocess.Popen(["open", "-na", BROWSER, "--args", f"--user-data-dir={PROFILE}", f"--app={url}",
-                      "--no-first-run", "--no-default-browser-check"] + (["--start-fullscreen"] if big else []),
+    subprocess.Popen(["open", "-na", BROWSER, "--args", f"--user-data-dir={profile}", f"--app={url}",
+                      "--no-first-run", "--no-default-browser-check"] + (["--kiosk"] if full else []),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    box = None if full else geometry(*screen())  # a few seconds of system_profiler, spent while Chrome starts
     if box:
         for _ in range(50):  # scripting Chrome while it starts is slow and fails: wait for its process first
             if pids():

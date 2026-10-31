@@ -226,7 +226,7 @@ function targetRing(S) {
 }
 
 // ---------- effects driven by changes in the session ----------
-const fx = { flashes: new Map(), pulses: [], hits: [], bubbles: [], swellAt: -1e9, seen: null, status: new Map(), sid: null }
+const fx = { flashes: new Map(), pulses: [], hits: [], bubbles: [], swellAt: -1e9, sentAt: -1e9, seen: null, status: new Map(), sid: null }
 let lastTick = 0
 function watch(S, now) {
   if (fx.sid !== S.id) { Object.assign(fx, { flashes: new Map(), pulses: [], hits: [], bubbles: [], seen: { ...S.counts }, status: new Map(), sid: S.id }); return }
@@ -327,6 +327,10 @@ function draw(S, drawn, edges, ring, now, tsec) {
     if (fl && now - fl.at < 1100) { ctx.globalAlpha = Math.min(1, (1100 - (now - fl.at)) / 400); ctx.fillStyle = C.fg; ctx.font = font(11); ctx.fillText(shortTool(fl.tool), p.x, p.y - r - 7 * k) }
   }
   const m = pos.get(MAIN)
+  if (now - fx.sentAt < 900) { // a request went out: one amber ring leaves the main node
+    const t = (now - fx.sentAt) / 900
+    ctx.globalAlpha = 1 - t; ctx.strokeStyle = C.amber; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(m.x, m.y, radiusOf({ id: MAIN }) + t * 90 * k, 0, 7); ctx.stroke(); ctx.globalAlpha = 1
+  }
   fx.bubbles.forEach((b, i) => {
     const age = now - b.at, a = age < 300 ? age / 300 : age > 6000 ? Math.max(0, 1 - (age - 6000) / 1000) : 1
     const text = '> ' + (b.text.length > 56 ? b.text.slice(0, 55) + '…' : b.text)
@@ -425,7 +429,7 @@ const cancel = () => fetch('/cancel', { method: 'POST', headers: { 'X-HUD-Token'
 es.addEventListener('chat', e => {
   let m; try { m = JSON.parse(e.data) } catch { return }
   if (m.kind === 'hearing') { if (!document.body.classList.contains('wake')) enterWake('listening'); wake.heard.textContent = m.text; setWake(m.phase === 'sending' ? 'sending' : 'listening'); return }
-  if (m.kind === 'ask') { addChat('ask', m.text); if (document.body.classList.contains('wake')) { wake.heard.textContent = m.text; wake.reply.textContent = ''; setWake('thinking') } }
+  if (m.kind === 'ask') { addChat('ask', m.text); fx.sentAt = performance.now(); if (document.body.classList.contains('wake')) leaveWake() } // sent: the full HUD shows the work
   else {
     addChat(m.kind, m.text, m.cost != null ? `$${Number(m.cost).toFixed(2)} ${fmtMs(m.ms)}` : '')
     if (document.body.classList.contains('wake')) typeOut(wake.reply, m.text, m.kind === 'error' ? 'error' : '')
