@@ -120,7 +120,8 @@ hold only the state name. The listener keeps no audio and sends none. The log is
 a 0700 directory and rotates at 20 MB. The server listens on localhost only.
 `POST /ask` and `POST /state` need a token the server makes for each run and writes
 to `~/.cache/claude-hud/token` (0600); the page gets it inline, the listener reads
-the file. `POST /focus` activates the terminal app the hook started the server from
+the file. It guards against cross-site request forgery; it is
+not a local login, since any program on this Mac can run `claude` itself. `POST /focus` activates the terminal app the hook started the server from
 and nothing else.
 
 ## Limits
