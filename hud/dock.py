@@ -171,7 +171,8 @@ AGENT_PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{AGENT_LABEL}.plist")
 
 
 def agent_plist(app, log):
-    """A launchd agent: the listener from login on, restarted if it dies. It goes through `open`, the
+    """A launchd agent: the listener from login on, restarted whenever it ends (launchd only sees `open`
+    exit, always 0, so KeepAlive must not depend on the exit code). It goes through `open`, the
     normal app launch path, which is what makes macOS treat it as an app, ask for the microphone and list
     it in Privacy & Security; an executable run straight from launchd is refused without a word."""
     from xml.sax.saxutils import escape as x
@@ -181,7 +182,7 @@ def agent_plist(app, log):
 <key>Label</key><string>{AGENT_LABEL}</string>
 <key>ProgramArguments</key><array><string>/usr/bin/open</string><string>-W</string><string>-g</string><string>-a</string><string>{x(app)}</string></array>
 <key>RunAtLoad</key><true/>
-<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+<key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>10</integer>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
 <key>StandardErrorPath</key><string>{x(log)}</string>
